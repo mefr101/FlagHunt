@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FlagHunt.App/FlagHunt.App.csproj" />
+    <Project Path="src/FlagHunt.Core/FlagHunt.Core.csproj" />
+  </Folder>
+</Solution>

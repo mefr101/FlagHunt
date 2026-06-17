@@ -1,0 +1,595 @@
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using FlagHunt.Core;
+using FlagHunt.Core.Providers;
+using Microsoft.Win32;
+
+namespace FlagHunt;
+
+/// <summary>
+/// Frontend only: builds the UI, manages presentation state, and delegates all CTF/AI work
+/// (prompt, providers, content building, conversation history) to the FlagHunt.Core backend.
+/// </summary>
+public partial class MainWindow : Window
+{
+    // ── Colour helper ──────────────────────────────────────────────────────
+    private static SolidColorBrush B(string hex) =>
+        new((Color)ColorConverter.ConvertFromString(hex));
+
+    // ── Backend state ──────────────────────────────────────────────────────
+    private readonly Conversation _conv = new();
+    private readonly List<Attachment> _files = [];
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(300) };
+
+    // ── UI state ───────────────────────────────────────────────────────────
+    private string _provider = "anthropic";
+    private string _cat = "auto";
+    private bool _loading;
+    private readonly Dictionary<string, Button> _catBtns = [];
+
+    private bool _chPh = true;
+    private bool _fuPh = true;
+    private const string ChPh = "Paste challenge, ciphertext, hex dump, code, or anything...";
+    private const string FuPh = "Ask a follow-up question...";
+
+    // Thinking animation
+    private DispatcherTimer? _thinkTimer;
+    private StackPanel? _thinkFrame;
+    private TextBlock? _thinkLbl;
+    private int _thinkI;
+    private static readonly string[] Dots = ["|", "/", "-", "\\"];
+
+    public MainWindow()
+    {
+        InitializeComponent();
+    }
+
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        BuildCategoryButtons();
+        ShowWelcome();
+    }
+
+    // ── Category grid ──────────────────────────────────────────────────────
+    private void BuildCategoryButtons()
+    {
+        CatGrid.Children.Clear();
+        _catBtns.Clear();
+        foreach (var cat in CtfKnowledge.Categories)
+        {
+            var btn = new Button { Content = cat.Label, Style = (Style)FindResource("CatBtn"), Tag = cat.Value };
+            btn.Click += (s, _) => SelectCategory((string)((Button)s).Tag);
+            _catBtns[cat.Value] = btn;
+            CatGrid.Children.Add(btn);
+        }
+        SelectCategory("auto");
+    }
+
+    // ── Provider switching ─────────────────────────────────────────────────
+    private void RbAnthropic_Checked(object sender, RoutedEventArgs e)
+    {
+        if (AnthropicCfg is null) return;
+        _provider = "anthropic";
+        AnthropicCfg.Visibility = Visibility.Visible;
+        OllamaCfg.Visibility = Visibility.Collapsed;
+        CursorCfg.Visibility = Visibility.Collapsed;
+        SetStatus("anthropic  ready", "#00E5B0");
+    }
+
+    private void RbOllama_Checked(object sender, RoutedEventArgs e)
+    {
+        if (OllamaCfg is null) return;
+        _provider = "ollama";
+        AnthropicCfg.Visibility = Visibility.Collapsed;
+        OllamaCfg.Visibility = Visibility.Visible;
+        CursorCfg.Visibility = Visibility.Collapsed;
+        SetStatus("ollama  connecting...", "#9B6DFF");
+        _ = FetchOllamaModels();
+    }
+
+    private void RbCursor_Checked(object sender, RoutedEventArgs e)
+    {
+        if (CursorCfg is null) return;
+        _provider = "cursor";
+        AnthropicCfg.Visibility = Visibility.Collapsed;
+        OllamaCfg.Visibility = Visibility.Collapsed;
+        CursorCfg.Visibility = Visibility.Visible;
+        SetStatus("cursor ai  ready", "#E879F9");
+    }
+
+    // ── Ollama model fetch (delegates to backend) ──────────────────────────
+    private async Task FetchOllamaModels()
+    {
+        var names = await OllamaProvider.FetchModelsAsync(_http, TbOllamaHost.Text);
+        if (names.Count == 0)
+        {
+            SetStatus("ollama: cannot connect -- run: ollama serve", "#FF3B5C");
+            return;
+        }
+        CbOllamaModel.ItemsSource = names;
+        if (!names.Contains(CbOllamaModel.Text))
+            CbOllamaModel.Text = names[0];
+        SetStatus($"ollama  {names.Count} model(s) ready", "#9B6DFF");
+    }
+
+    private async void BtnFetchModels_Click(object sender, RoutedEventArgs e)
+        => await FetchOllamaModels();
+
+    // ── Category selection ─────────────────────────────────────────────────
+    private void SelectCategory(string val)
+    {
+        _cat = val;
+        foreach (var (v, btn) in _catBtns)
+        {
+            if (v == val)
+            {
+                btn.Background = B("#2E3A52");
+                btn.Foreground = B("#00E5B0");
+                btn.BorderBrush = B("#00E5B0");
+            }
+            else
+            {
+                btn.Background = B("#1E2535");
+                btn.Foreground = B("#5A6A85");
+                btn.BorderBrush = B("#252D40");
+            }
+        }
+        string label = CtfKnowledge.Categories.FirstOrDefault(c => c.Value == val)?.Label ?? val;
+        ChatTitle.Text = $"  analysis  .  {label.ToLower()}  .  ready";
+    }
+
+    // ── File attachments ───────────────────────────────────────────────────
+    private void BtnAttach_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Title = "Attach CTF Files", Multiselect = true, Filter = "All Files (*.*)|*.*" };
+        if (dlg.ShowDialog() != true) return;
+        foreach (string path in dlg.FileNames)
+        {
+            if (_files.Any(f => f.Path == path)) continue;
+            string name = Path.GetFileName(path);
+            _files.Add(new Attachment(path, name));
+            AddFileChip(path, name);
+        }
+    }
+
+    private void AddFileChip(string path, string name)
+    {
+        string ext = name.Contains('.') ? name.Split('.').Last().ToUpper() : "FILE";
+        if (ext.Length > 5) ext = ext[..5];
+
+        var chip = new Border
+        {
+            Background = B("#1E2535"),
+            BorderBrush = B("#252D40"),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 2, 0, 0)
+        };
+
+        var row = new DockPanel { LastChildFill = true };
+
+        var badge = new Border { Background = B("#00E5B0"), Padding = new Thickness(4, 3, 4, 3), Margin = new Thickness(0, 0, 6, 0) };
+        badge.Child = new TextBlock { Text = $" {ext} ", Foreground = Brushes.Black, FontFamily = new FontFamily("Segoe UI"), FontSize = 8, FontWeight = FontWeights.Bold };
+        DockPanel.SetDock(badge, Dock.Left);
+        row.Children.Add(badge);
+
+        var rm = new Button
+        {
+            Content = "x",
+            Background = Brushes.Transparent,
+            Foreground = B("#3D4F6A"),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6, 3, 6, 3),
+            Cursor = Cursors.Hand,
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 11
+        };
+        rm.Click += (_, _) => { _files.RemoveAll(f => f.Path == path); FilesList.Children.Remove(chip); };
+        DockPanel.SetDock(rm, Dock.Right);
+        row.Children.Add(rm);
+
+        row.Children.Add(new TextBlock
+        {
+            Text = name.Length > 26 ? name[..26] + "..." : name,
+            Foreground = B("#DDE6F5"),
+            FontFamily = new FontFamily("Cascadia Code, Consolas, monospace"),
+            FontSize = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0, 4, 0, 4)
+        });
+
+        chip.Child = row;
+        FilesList.Children.Add(chip);
+    }
+
+    // ── Placeholder helpers ────────────────────────────────────────────────
+    private void ChallengeTxt_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_chPh) return;
+        ChallengeTxt.Text = "";
+        ChallengeTxt.Foreground = B("#DDE6F5");
+        _chPh = false;
+    }
+
+    private void ChallengeTxt_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(ChallengeTxt.Text)) return;
+        ChallengeTxt.Text = ChPh;
+        ChallengeTxt.Foreground = B("#5A6A85");
+        _chPh = true;
+    }
+
+    private void FuEntry_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_fuPh) return;
+        FuEntry.Text = "";
+        FuEntry.Foreground = B("#DDE6F5");
+        _fuPh = false;
+    }
+
+    private void FuEntry_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(FuEntry.Text)) return;
+        FuEntry.Text = FuPh;
+        FuEntry.Foreground = B("#5A6A85");
+        _fuPh = true;
+    }
+
+    private void FuEntry_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Return) BtnSend_Click(sender, e);
+    }
+
+    // ── Status LED ─────────────────────────────────────────────────────────
+    private void SetStatus(string text, string hex)
+    {
+        var brush = B(hex);
+        StatusLabel.Text = text;
+        StatusLabel.Foreground = brush;
+        LedEllipse.Fill = brush;
+    }
+
+    // ── Welcome screen ─────────────────────────────────────────────────────
+    private void ShowWelcome()
+    {
+        ConvPanel.Children.Clear();
+
+        var outer = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 80, 0, 0), Tag = "welcome" };
+
+        outer.Children.Add(new TextBlock
+        {
+            Text = "FlagHunt",
+            Foreground = B("#DDE6F5"),
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 32,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center
+        });
+
+        outer.Children.Add(new TextBlock
+        {
+            Text = "AI-Powered CTF Solver",
+            Foreground = B("#00E5B0"),
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 2, 0, 16)
+        });
+
+        var pills = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        foreach (string t in new[] { "Anthropic", "Ollama", "Cursor AI", "Web", "Crypto", "Pwn", "Forensics", "Reversing", "Stego", "OSINT", "Networking" })
+        {
+            var pill = new Border { Background = B("#1E2535"), BorderBrush = B("#2E3A52"), BorderThickness = new Thickness(1), Margin = new Thickness(3), Padding = new Thickness(8, 3, 8, 3) };
+            pill.Child = new TextBlock { Text = t, Foreground = B("#5A6A85"), FontFamily = new FontFamily("Segoe UI"), FontSize = 9 };
+            pills.Children.Add(pill);
+        }
+        outer.Children.Add(pills);
+
+        outer.Children.Add(new TextBlock
+        {
+            Text = "\nPaste a challenge, attach files, pick a category, hit Solve",
+            Foreground = B("#5A6A85"),
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 10,
+            HorizontalAlignment = HorizontalAlignment.Center
+        });
+
+        ConvPanel.Children.Add(outer);
+    }
+
+    private void RemoveWelcome()
+    {
+        var w = ConvPanel.Children.OfType<StackPanel>().FirstOrDefault(p => (string?)p.Tag == "welcome");
+        if (w is not null) ConvPanel.Children.Remove(w);
+    }
+
+    // ── Message rendering ──────────────────────────────────────────────────
+    private void AddMessage(string role, string text)
+    {
+        RemoveWelcome();
+
+        string roleLabel = role == "user" ? "YOU" :
+                           _provider == "ollama" ? $"OLLAMA  {CbOllamaModel.Text}" :
+                           _provider == "cursor" ? $"CURSOR AI  {CbCursorModel.Text}" : "AI SOLVER  claude";
+
+        string roleHex = role == "user" ? "#4488FF" :
+                          _provider == "ollama" ? "#9B6DFF" :
+                          _provider == "cursor" ? "#E879F9" : "#00E5B0";
+
+        string bodyBg = role == "user" ? "#0E1420" : "#12151C";
+        string bodyBorder = role == "user" ? "#4488FF" :
+                            _provider == "ollama" ? "#9B6DFF" :
+                            _provider == "cursor" ? "#E879F9" : "#252D40";
+
+        var outer = new StackPanel { Margin = new Thickness(20, 0, 20, 12) };
+
+        var labelRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        labelRow.Children.Add(new Border { Width = 3, Background = B(roleHex), Margin = new Thickness(0, 0, 4, 0) });
+        labelRow.Children.Add(new TextBlock
+        {
+            Text = $"  {roleLabel}",
+            Foreground = B(roleHex),
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 8,
+            FontWeight = FontWeights.Bold,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        outer.Children.Add(labelRow);
+
+        var body = new Border
+        {
+            Background = B(bodyBg),
+            BorderBrush = B(bodyBorder),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(14, 12, 14, 12)
+        };
+
+        var tb = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = new FontFamily("Cascadia Code, Consolas, monospace"),
+            FontSize = 10,
+            Foreground = B("#DDE6F5"),
+            LineHeight = 18
+        };
+
+        RenderText(tb, text);
+        body.Child = tb;
+        outer.Children.Add(body);
+
+        ConvPanel.Children.Add(outer);
+        ChatScroll.ScrollToEnd();
+    }
+
+    private static void RenderText(TextBlock tb, string text)
+    {
+        bool inCode = false;
+        string[] lines = text.Split('\n');
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (i > 0) tb.Inlines.Add(new LineBreak());
+            string line = lines[i];
+
+            if (line.TrimStart().StartsWith("```"))
+            {
+                inCode = !inCode;
+                tb.Inlines.Add(new Run(line) { Foreground = B("#7EC8A4"), Background = B("#0D1018") });
+                continue;
+            }
+            if (inCode)
+            {
+                tb.Inlines.Add(new Run(line) { Foreground = B("#7EC8A4"), Background = B("#0D1018") });
+                continue;
+            }
+
+            var fm = Regex.Match(line, @"((?:flag|ctf|CTF|FLAG)\{[^}]+\})");
+            if (fm.Success)
+            {
+                if (fm.Index > 0) tb.Inlines.Add(new Run(line[..fm.Index]));
+                tb.Inlines.Add(new Run($"  {fm.Value}  ") { Background = B("#091E18"), Foreground = B("#00E5B0"), FontWeight = FontWeights.Bold, FontSize = 11 });
+                if (fm.Index + fm.Length < line.Length) tb.Inlines.Add(new Run(line[(fm.Index + fm.Length)..]));
+                continue;
+            }
+
+            if (line.Contains("**"))
+            {
+                var parts = Regex.Split(line, @"\*\*(.*?)\*\*");
+                for (int j = 0; j < parts.Length; j++)
+                    tb.Inlines.Add(j % 2 == 1
+                        ? new Run(parts[j]) { FontWeight = FontWeights.Bold }
+                        : new Run(parts[j]));
+                continue;
+            }
+
+            if (line.Contains('`'))
+            {
+                var parts = Regex.Split(line, @"`([^`]+)`");
+                for (int j = 0; j < parts.Length; j++)
+                    tb.Inlines.Add(j % 2 == 1
+                        ? new Run(parts[j]) { Foreground = B("#7EC8A4"), Background = B("#0D1018") }
+                        : new Run(parts[j]));
+                continue;
+            }
+
+            tb.Inlines.Add(new Run(line));
+        }
+    }
+
+    // ── Thinking spinner ───────────────────────────────────────────────────
+    private void AddThinking()
+    {
+        RemoveWelcome();
+        string rc = _provider == "ollama" ? "#9B6DFF" : _provider == "cursor" ? "#E879F9" : "#00E5B0";
+
+        var outer = new StackPanel { Margin = new Thickness(20, 0, 20, 12), Tag = "thinking" };
+
+        var labelRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        labelRow.Children.Add(new Border { Width = 3, Background = B(rc), Margin = new Thickness(0, 0, 4, 0) });
+        labelRow.Children.Add(new TextBlock { Text = "  AI SOLVER", Foreground = B(rc), FontFamily = new FontFamily("Segoe UI"), FontSize = 8, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
+        outer.Children.Add(labelRow);
+
+        _thinkLbl = new TextBlock
+        {
+            Text = "|  analyzing challenge...",
+            Foreground = B("#5A6A85"),
+            FontFamily = new FontFamily("Cascadia Code, Consolas, monospace"),
+            FontSize = 10
+        };
+
+        var body = new Border { Background = B("#12151C"), BorderBrush = B("#252D40"), BorderThickness = new Thickness(1), Padding = new Thickness(14, 12, 14, 12) };
+        body.Child = _thinkLbl;
+        outer.Children.Add(body);
+
+        ConvPanel.Children.Add(outer);
+        ChatScroll.ScrollToEnd();
+
+        _thinkFrame = outer;
+        _thinkI = 0;
+        _thinkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _thinkTimer.Tick += (_, _) =>
+        {
+            if (_thinkLbl is not null)
+                _thinkLbl.Text = $"{Dots[_thinkI++ % Dots.Length]}  analyzing challenge...";
+        };
+        _thinkTimer.Start();
+    }
+
+    private void StopThinking()
+    {
+        _thinkTimer?.Stop();
+        _thinkTimer = null;
+        if (_thinkFrame is not null) { ConvPanel.Children.Remove(_thinkFrame); _thinkFrame = null; }
+        _thinkLbl = null;
+    }
+
+    // ── Clear / Copy ───────────────────────────────────────────────────────
+    private void BtnClear_Click(object sender, RoutedEventArgs e)
+    {
+        _conv.Clear();
+        _files.Clear();
+        FilesList.Children.Clear();
+        ShowWelcome();
+        SetStatus("cleared  ready", "#5A6A85");
+    }
+
+    private void BtnCopy_Click(object sender, RoutedEventArgs e)
+    {
+        var sb = new StringBuilder();
+        foreach (var sp in ConvPanel.Children.OfType<StackPanel>())
+        {
+            if ((string?)sp.Tag == "welcome") continue;
+            foreach (var border in sp.Children.OfType<Border>())
+                if (border.Child is TextBlock tb)
+                {
+                    foreach (var r in tb.Inlines.OfType<Run>()) sb.Append(r.Text);
+                    sb.AppendLine();
+                }
+            sb.AppendLine("---");
+        }
+        if (sb.Length > 0) { Clipboard.SetText(sb.ToString()); SetStatus("copied to clipboard", "#00E5B0"); }
+    }
+
+    // ── Provider construction (frontend config -> backend provider) ─────────
+    private IChatProvider BuildProvider() => _provider switch
+    {
+        "ollama" => new OllamaProvider(_http, new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim())),
+        "cursor" => new CursorProvider(_http, new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim())),
+        _ => new AnthropicProvider(_http, new AnthropicOptions(PbAnthropicKey.Password))
+    };
+
+    // ── Solve ──────────────────────────────────────────────────────────────
+    private async void BtnSolve_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+
+        string ch = _chPh ? "" : ChallengeTxt.Text.Trim();
+        if (string.IsNullOrEmpty(ch) && _files.Count == 0)
+        {
+            MessageBox.Show("Enter a challenge description or attach files.", "Nothing to solve",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _loading = true;
+        BtnSolve.IsEnabled = false;
+        BtnSolve.Content = "  Analyzing...";
+        SetStatus("running...", "#FFC14D");
+
+        string display = string.IsNullOrEmpty(ch) ? $"[Analyzing {_files.Count} attached file(s)]" : ch;
+        AddMessage("user", display);
+
+        string content = ContentBuilder.Build(
+            _cat,
+            string.IsNullOrEmpty(ch) ? "Analyze the attached files and solve this CTF challenge." : ch,
+            _files);
+        _conv.AddUser(content);
+        AddThinking();
+
+        await RunCompletion();
+
+        _loading = false;
+        BtnSolve.IsEnabled = true;
+        BtnSolve.Content = "SOLVE CHALLENGE";
+        SetStatus("complete  ready", "#00E5B0");
+    }
+
+    // ── Follow-up ──────────────────────────────────────────────────────────
+    private async void BtnSend_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _fuPh) return;
+        string text = FuEntry.Text.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+
+        FuEntry.Text = FuPh;
+        FuEntry.Foreground = B("#5A6A85");
+        _fuPh = true;
+
+        _loading = true;
+        BtnSend.IsEnabled = false;
+
+        AddMessage("user", text);
+        _conv.AddUser(text);
+        AddThinking();
+
+        await RunCompletion();
+
+        _loading = false;
+        BtnSend.IsEnabled = true;
+        SetStatus("ready", "#00E5B0");
+    }
+
+    /// <summary>Runs the configured provider against the current history and renders the reply.</summary>
+    private async Task RunCompletion()
+    {
+        var provider = BuildProvider();
+        try
+        {
+            ChatResult result = await provider.CompleteAsync(_conv.Messages);
+            StopThinking();
+            if (!result.Success)
+            {
+                AddMessage("assistant", result.Text);
+                _conv.RemoveLast();
+            }
+            else
+            {
+                _conv.AddAssistant(result.Text);
+                AddMessage("assistant", result.Text);
+            }
+        }
+        catch (Exception ex)
+        {
+            StopThinking();
+            AddMessage("assistant", $"Error: {ex.Message}");
+            _conv.RemoveLast();
+        }
+    }
+}
