@@ -1,0 +1,25 @@
+<Application x:Class="FlagHunt.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="BgBrush"      Color="#0B0D11"/>
+        <SolidColorBrush x:Key="PanelBrush"   Color="#12151C"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#181D27"/>
+        <SolidColorBrush x:Key="Srf2Brush"    Color="#1E2535"/>
+        <SolidColorBrush x:Key="BdrBrush"     Color="#252D40"/>
+        <SolidColorBrush x:Key="Bdr2Brush"    Color="#2E3A52"/>
+        <SolidColorBrush x:Key="AccentBrush"  Color="#00E5B0"/>
+        <SolidColorBrush x:Key="AccentDkBrush" Color="#00B589"/>
+        <SolidColorBrush x:Key="BlueBrush"    Color="#4488FF"/>
+        <SolidColorBrush x:Key="PurpleBrush"  Color="#9B6DFF"/>
+        <SolidColorBrush x:Key="RedBrush"     Color="#FF3B5C"/>
+        <SolidColorBrush x:Key="YellowBrush"  Color="#FFC14D"/>
+        <SolidColorBrush x:Key="TextBrush"    Color="#DDE6F5"/>
+        <SolidColorBrush x:Key="MutedBrush"   Color="#5A6A85"/>
+        <SolidColorBrush x:Key="Muted2Brush"  Color="#3D4F6A"/>
+        <SolidColorBrush x:Key="CodeBgBrush"  Color="#0D1018"/>
+        <SolidColorBrush x:Key="FlagBgBrush"  Color="#091E18"/>
+        <SolidColorBrush x:Key="CursorBrush"  Color="#E879F9"/>
+    </Application.Resources>
+</Application>

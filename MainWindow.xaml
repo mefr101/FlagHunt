@@ -1,0 +1,455 @@
+<Window x:Class="FlagHunt.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FlagHunt - CTF Solver"
+        Width="1400" Height="860"
+        MinWidth="1000" MinHeight="640"
+        Background="{StaticResource BgBrush}"
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded">
+
+    <Window.Resources>
+        <!-- Category button -->
+        <Style x:Key="CatBtn" TargetType="Button">
+            <Setter Property="Background"              Value="{StaticResource Srf2Brush}"/>
+            <Setter Property="Foreground"              Value="{StaticResource MutedBrush}"/>
+            <Setter Property="BorderBrush"             Value="{StaticResource BdrBrush}"/>
+            <Setter Property="BorderThickness"         Value="1"/>
+            <Setter Property="Padding"                 Value="10,8"/>
+            <Setter Property="Margin"                  Value="3"/>
+            <Setter Property="Cursor"                  Value="Hand"/>
+            <Setter Property="FontFamily"              Value="Segoe UI"/>
+            <Setter Property="FontSize"                Value="11"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource Bdr2Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Small header button (clear / copy) -->
+        <Style x:Key="SmallBtn" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource Srf2Brush}"/>
+            <Setter Property="Foreground"      Value="{StaticResource MutedBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="10,4"/>
+            <Setter Property="Margin"          Value="3,0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="FontFamily"      Value="Segoe UI"/>
+            <Setter Property="FontSize"        Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource Bdr2Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Provider radio -->
+        <Style x:Key="ProviderRb" TargetType="RadioButton">
+            <Setter Property="Foreground"        Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Background"        Value="Transparent"/>
+            <Setter Property="Margin"            Value="0,0,18,0"/>
+            <Setter Property="Cursor"            Value="Hand"/>
+            <Setter Property="FontFamily"        Value="Segoe UI"/>
+            <Setter Property="FontSize"          Value="11"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Outer ring + inner dot -->
+                            <Grid Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center">
+                                <Ellipse Stroke="{StaticResource MutedBrush}" StrokeThickness="1.5" Fill="Transparent"/>
+                                <Ellipse x:Name="Dot" Width="6" Height="6"
+                                         Fill="White" Visibility="Collapsed"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Solve button -->
+        <Style x:Key="SolveBtn" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Foreground"      Value="#000000"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="0,13"/>
+            <Setter Property="Margin"          Value="12,12"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="FontFamily"      Value="Segoe UI"/>
+            <Setter Property="FontSize"        Value="13"/>
+            <Setter Property="FontWeight"      Value="Bold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource AccentDkBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="{StaticResource Muted2Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Send button -->
+        <Style x:Key="SendBtn" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource BlueBrush}"/>
+            <Setter Property="Foreground"      Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="16,0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="FontFamily"      Value="Segoe UI"/>
+            <Setter Property="FontSize"        Value="10"/>
+            <Setter Property="FontWeight"      Value="Bold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#2255CC"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="{StaticResource Muted2Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56"/>  <!-- title bar -->
+            <RowDefinition Height="2"/>   <!-- accent line -->
+            <RowDefinition Height="48"/>  <!-- provider bar -->
+            <RowDefinition Height="1"/>   <!-- divider -->
+            <RowDefinition Height="*"/>   <!-- main content -->
+        </Grid.RowDefinitions>
+
+        <!-- ─────────────────── TITLE BAR ─────────────────── -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}">
+            <DockPanel LastChildFill="False" Margin="20,0">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="{StaticResource AccentBrush}" Margin="0,0,10,0">
+                        <TextBlock Text="  FLAG  " Foreground="#000000"
+                                   FontFamily="Segoe UI" FontSize="11" FontWeight="Bold"
+                                   Padding="2,4"/>
+                    </Border>
+                    <TextBlock Text="Hunt" Foreground="{StaticResource TextBrush}"
+                               FontFamily="Segoe UI" FontSize="20" FontWeight="Bold"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="  //  CTF Solver" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Segoe UI" FontSize="11" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="LedEllipse" Width="8" Height="8"
+                             Fill="{StaticResource AccentBrush}" Margin="0,0,6,0"/>
+                    <TextBlock x:Name="StatusLabel" Text="ready"
+                               Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ─────────────────── ACCENT LINE ─────────────────── -->
+        <Border Grid.Row="1" Background="{StaticResource AccentBrush}"/>
+
+        <!-- ─────────────────── PROVIDER BAR ─────────────────── -->
+        <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0">
+
+                <TextBlock Text="PROVIDER:" Foreground="{StaticResource MutedBrush}"
+                           FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                           VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                <RadioButton x:Name="RbAnthropic" Content="Anthropic"
+                             Style="{StaticResource ProviderRb}" IsChecked="True"
+                             Checked="RbAnthropic_Checked"/>
+                <RadioButton x:Name="RbOllama"   Content="Ollama  (local)"
+                             Style="{StaticResource ProviderRb}"
+                             Checked="RbOllama_Checked"/>
+                <RadioButton x:Name="RbCursor"   Content="Cursor AI"
+                             Style="{StaticResource ProviderRb}"
+                             Checked="RbCursor_Checked"/>
+
+                <!-- Anthropic config -->
+                <StackPanel x:Name="AnthropicCfg" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="API KEY:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="8,0,6,0"/>
+                    <PasswordBox x:Name="PbAnthropicKey" Width="280"
+                                 Background="{StaticResource Srf2Brush}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                                 Padding="6,4"/>
+                </StackPanel>
+
+                <!-- Ollama config -->
+                <StackPanel x:Name="OllamaCfg" Orientation="Horizontal"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                    <TextBlock Text="HOST:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="8,0,6,0"/>
+                    <TextBox x:Name="TbOllamaHost" Text="http://localhost:11434" Width="170"
+                             Background="{StaticResource Srf2Brush}" Foreground="{StaticResource TextBrush}"
+                             BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                             FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                             Padding="6,3" CaretBrush="{StaticResource AccentBrush}"/>
+                    <TextBlock Text="  MODEL:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="CbOllamaModel" Width="140" IsEditable="True"
+                              Background="White" Foreground="#000000"
+                              BorderBrush="{StaticResource BdrBrush}"
+                              FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                              Text="llama3"/>
+                    <Button Content=" fetch " Margin="8,0,0,0" Padding="8,3"
+                            Click="BtnFetchModels_Click" Cursor="Hand"
+                            Background="{StaticResource Srf2Brush}"
+                            Foreground="{StaticResource PurpleBrush}"
+                            BorderThickness="0" FontFamily="Segoe UI" FontSize="10"/>
+                </StackPanel>
+
+                <!-- Cursor AI config -->
+                <StackPanel x:Name="CursorCfg" Orientation="Horizontal"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                    <TextBlock Text="API KEY:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="8,0,6,0"/>
+                    <PasswordBox x:Name="PbCursorKey" Width="240"
+                                 Background="{StaticResource Srf2Brush}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                                 Padding="6,4"/>
+                    <TextBlock Text="  MODEL:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="CbCursorModel" Width="210" IsEditable="True"
+                              Background="{StaticResource Srf2Brush}" Foreground="{StaticResource TextBrush}"
+                              BorderBrush="{StaticResource BdrBrush}"
+                              FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                              Text="cursor-small">
+                        <ComboBoxItem>cursor-small</ComboBoxItem>
+                        <ComboBoxItem>gpt-4o</ComboBoxItem>
+                        <ComboBoxItem>gpt-4o-mini</ComboBoxItem>
+                        <ComboBoxItem>claude-3-5-sonnet-20241022</ComboBoxItem>
+                        <ComboBoxItem>claude-3-opus-20240229</ComboBoxItem>
+                        <ComboBoxItem>gemini-1.5-pro</ComboBoxItem>
+                        <ComboBoxItem>o1-mini</ComboBoxItem>
+                    </ComboBox>
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <!-- ─────────────────── TOP DIVIDER ─────────────────── -->
+        <Border Grid.Row="3" Background="{StaticResource BdrBrush}"/>
+
+        <!-- ─────────────────── MAIN CONTENT ─────────────────── -->
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="1"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ──── SIDEBAR ──── -->
+            <ScrollViewer Grid.Column="0"
+                          Background="{StaticResource PanelBrush}"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+
+                    <!-- Category header -->
+                    <StackPanel Margin="16,16,16,0">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="CATEGORY" DockPanel.Dock="Left"
+                                       Foreground="{StaticResource Muted2Brush}"
+                                       FontFamily="Segoe UI" FontSize="7" FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                            <Border Height="1" Margin="8,0,0,0"
+                                    Background="{StaticResource BdrBrush}"
+                                    VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </StackPanel>
+
+                    <UniformGrid x:Name="CatGrid" Columns="2" Margin="12,6,12,0"/>
+
+                    <Border Height="1" Margin="12,10" Background="{StaticResource BdrBrush}"/>
+
+                    <!-- Attachments header -->
+                    <StackPanel Margin="16,0,16,0">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="ATTACHMENTS" DockPanel.Dock="Left"
+                                       Foreground="{StaticResource Muted2Brush}"
+                                       FontFamily="Segoe UI" FontSize="7" FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                            <Border Height="1" Margin="8,0,0,0"
+                                    Background="{StaticResource BdrBrush}"
+                                    VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </StackPanel>
+
+                    <Button Content="  Attach Files" Margin="12,6,12,0"
+                            Click="BtnAttach_Click"
+                            Background="{StaticResource Srf2Brush}"
+                            Foreground="{StaticResource AccentBrush}"
+                            BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                            Padding="12,9" Cursor="Hand"
+                            FontFamily="Segoe UI" FontSize="11"
+                            HorizontalContentAlignment="Left"/>
+
+                    <StackPanel x:Name="FilesList" Margin="12,4,12,0"/>
+
+                    <Border Height="1" Margin="12,10" Background="{StaticResource BdrBrush}"/>
+
+                    <!-- Challenge input header -->
+                    <StackPanel Margin="16,0,16,0">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="CHALLENGE INPUT" DockPanel.Dock="Left"
+                                       Foreground="{StaticResource Muted2Brush}"
+                                       FontFamily="Segoe UI" FontSize="7" FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                            <Border Height="1" Margin="8,0,0,0"
+                                    Background="{StaticResource BdrBrush}"
+                                    VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </StackPanel>
+
+                    <TextBox x:Name="ChallengeTxt"
+                             Margin="12,6,12,0" MinHeight="120"
+                             Background="{StaticResource CodeBgBrush}"
+                             Foreground="{StaticResource MutedBrush}"
+                             BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                             FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                             Padding="10" AcceptsReturn="True" TextWrapping="Wrap"
+                             CaretBrush="{StaticResource AccentBrush}"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="Paste challenge, ciphertext, hex dump, code, or anything..."
+                             GotFocus="ChallengeTxt_GotFocus"
+                             LostFocus="ChallengeTxt_LostFocus"/>
+
+                    <Button x:Name="BtnSolve" Content="SOLVE CHALLENGE"
+                            Style="{StaticResource SolveBtn}"
+                            Click="BtnSolve_Click"/>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Column divider -->
+            <Border Grid.Column="1" Background="{StaticResource BdrBrush}"/>
+
+            <!-- ──── CHAT AREA ──── -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="44"/>
+                    <RowDefinition Height="1"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="1"/>
+                    <RowDefinition Height="54"/>
+                </Grid.RowDefinitions>
+
+                <!-- Chat header -->
+                <Border Grid.Row="0" Background="{StaticResource SurfaceBrush}">
+                    <DockPanel LastChildFill="False" Margin="8,0">
+                        <TextBlock x:Name="ChatTitle"
+                                   Text="  analysis  .  auto-detect  .  ready"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                                   VerticalAlignment="Center" DockPanel.Dock="Left"/>
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                            <Button Content="clear"   Style="{StaticResource SmallBtn}" Click="BtnClear_Click"/>
+                            <Button Content="copy all" Style="{StaticResource SmallBtn}" Click="BtnCopy_Click"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Grid.Row="1" Background="{StaticResource BdrBrush}"/>
+
+                <!-- Message scroll -->
+                <ScrollViewer x:Name="ChatScroll" Grid.Row="2"
+                              Background="{StaticResource BgBrush}"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="ConvPanel" Margin="0,10,0,10"/>
+                </ScrollViewer>
+
+                <Border Grid.Row="3" Background="{StaticResource BdrBrush}"/>
+
+                <!-- Follow-up bar -->
+                <Border Grid.Row="4" Background="{StaticResource SurfaceBrush}">
+                    <DockPanel Margin="12,8" LastChildFill="True">
+                        <Button x:Name="BtnSend" DockPanel.Dock="Right"
+                                Content="Send" Style="{StaticResource SendBtn}"
+                                Click="BtnSend_Click"/>
+                        <TextBox x:Name="FuEntry"
+                                 Background="{StaticResource CodeBgBrush}"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                                 Padding="8,0" Margin="0,0,8,0"
+                                 CaretBrush="{StaticResource AccentBrush}"
+                                 VerticalContentAlignment="Center"
+                                 Text="Ask a follow-up question..."
+                                 GotFocus="FuEntry_GotFocus"
+                                 LostFocus="FuEntry_LostFocus"
+                                 KeyDown="FuEntry_KeyDown"/>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
