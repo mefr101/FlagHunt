@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using FlagHunt.Core;
+using FlagHunt.Core.Agent;
 using FlagHunt.Core.Providers;
 using Microsoft.Win32;
 
@@ -33,6 +34,8 @@ public partial class MainWindow : Window
     private string _provider = "anthropic";
     private string _cat = "auto";
     private bool _loading;
+    private bool _agentMode;
+    private StackPanel? _agentLog;
     private readonly Dictionary<string, Button> _catBtns = [];
 
     private bool _chPh = true;
@@ -103,6 +106,15 @@ public partial class MainWindow : Window
         OllamaCfg.Visibility = Visibility.Collapsed;
         CursorCfg.Visibility = Visibility.Visible;
         SetStatus("cursor ai  ready", "#E879F9");
+    }
+
+    // ── Agent mode toggle ──────────────────────────────────────────────────
+    private void ChkAgent_Changed(object sender, RoutedEventArgs e)
+    {
+        if (AgentCfg is null) return;
+        _agentMode = ChkAgent.IsChecked == true;
+        AgentCfg.Visibility = _agentMode ? Visibility.Visible : Visibility.Collapsed;
+        SetStatus(_agentMode ? "anthropic  agent mode (MCP tools)" : "anthropic  ready", "#00E5B0");
     }
 
     // ── Ollama model fetch (delegates to backend) ──────────────────────────
@@ -317,7 +329,8 @@ public partial class MainWindow : Window
 
         string roleLabel = role == "user" ? "YOU" :
                            _provider == "ollama" ? $"OLLAMA  {CbOllamaModel.Text}" :
-                           _provider == "cursor" ? $"CURSOR AI  {CbCursorModel.Text}" : "AI SOLVER  claude";
+                           _provider == "cursor" ? $"CURSOR AI  {CbCursorModel.Text}" :
+                           _agentMode ? "AI SOLVER  claude (agent)" : "AI SOLVER  claude";
 
         string roleHex = role == "user" ? "#4488FF" :
                           _provider == "ollama" ? "#9B6DFF" :
@@ -470,6 +483,82 @@ public partial class MainWindow : Window
         _thinkLbl = null;
     }
 
+    // ── Agent activity log (live MCP tool calls) ────────────────────────────
+    /// <summary>Renders one agent event into a live "AGENT" card, creating it on first use.</summary>
+    private void OnAgentActivity(AgentActivity a)
+    {
+        if (_agentLog is null)
+        {
+            RemoveWelcome();
+            var outer = new StackPanel { Margin = new Thickness(20, 0, 20, 12) };
+
+            var labelRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            labelRow.Children.Add(new Border { Width = 3, Background = B("#FFC14D"), Margin = new Thickness(0, 0, 4, 0) });
+            labelRow.Children.Add(new TextBlock { Text = "  AGENT  mcp toolbox", Foreground = B("#FFC14D"), FontFamily = new FontFamily("Segoe UI"), FontSize = 8, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
+            outer.Children.Add(labelRow);
+
+            var body = new Border { Background = B("#12151C"), BorderBrush = B("#2E3A52"), BorderThickness = new Thickness(1), Padding = new Thickness(14, 10, 14, 10) };
+            _agentLog = new StackPanel();
+            body.Child = _agentLog;
+            outer.Children.Add(body);
+
+            // Insert the activity card just above the thinking spinner if present.
+            int idx = _thinkFrame is not null ? ConvPanel.Children.IndexOf(_thinkFrame) : ConvPanel.Children.Count;
+            ConvPanel.Children.Insert(Math.Max(0, idx), outer);
+        }
+
+        (string prefix, string hex) = a.Kind switch
+        {
+            AgentActivityKind.ToolCall   => ("-> ", "#00E5B0"),
+            AgentActivityKind.ToolResult => ("   ", "#5A6A85"),
+            _                            => (".  ", "#9B6DFF"),
+        };
+
+        _agentLog.Children.Add(new TextBlock
+        {
+            Text = prefix + a.Text,
+            Foreground = B(hex),
+            FontFamily = new FontFamily("Cascadia Code, Consolas, monospace"),
+            FontSize = 10,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 1, 0, 1)
+        });
+        ChatScroll.ScrollToEnd();
+    }
+
+    /// <summary>
+    /// Resolves the host folder that the MCP toolbox mounts read-only at /workspace.
+    /// Order: FLAGHUNT_CHALLENGES_DIR env var, then a discovered <c>mcp/challenges</c>
+    /// next to <c>docker-compose.yml</c>, else a <c>challenges</c> folder beside the app.
+    /// </summary>
+    private static string ResolveChallengesDir()
+    {
+        string? env = Environment.GetEnvironmentVariable("FLAGHUNT_CHALLENGES_DIR");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, "mcp", "challenges");
+            if (File.Exists(Path.Combine(dir.FullName, "mcp", "docker-compose.yml")))
+                return candidate;
+        }
+        return Path.Combine(AppContext.BaseDirectory, "challenges");
+    }
+
+    /// <summary>Copies attached files into the toolbox workspace so the file tools can see them.</summary>
+    private string CopyAttachmentsToWorkspace()
+    {
+        string dir = ResolveChallengesDir();
+        Directory.CreateDirectory(dir);
+        foreach (var f in _files)
+        {
+            try { File.Copy(f.Path, Path.Combine(dir, f.Name), overwrite: true); }
+            catch (Exception ex) { OnAgentActivity(AgentActivity.Info($"could not stage {f.Name}: {ex.Message}")); }
+        }
+        return dir;
+    }
+
     // ── Clear / Copy ───────────────────────────────────────────────────────
     private void BtnClear_Click(object sender, RoutedEventArgs e)
     {
@@ -498,12 +587,25 @@ public partial class MainWindow : Window
     }
 
     // ── Provider construction (frontend config -> backend provider) ─────────
-    private IChatProvider BuildProvider() => _provider switch
+    private IChatProvider BuildProvider()
     {
-        "ollama" => new OllamaProvider(_http, new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim())),
-        "cursor" => new CursorProvider(_http, new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim())),
-        _ => new AnthropicProvider(_http, new AnthropicOptions(PbAnthropicKey.Password))
-    };
+        switch (_provider)
+        {
+            case "ollama":
+                return new OllamaProvider(_http, new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim()));
+            case "cursor":
+                return new CursorProvider(_http, new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim()));
+            default:
+                var anthOpts = new AnthropicOptions(PbAnthropicKey.Password);
+                if (!_agentMode)
+                    return new AnthropicProvider(_http, anthOpts);
+
+                anthOpts = anthOpts with { UseTools = true, McpUrl = TbMcpUrl.Text.Trim() };
+                // Progress is captured on the UI thread, so handlers run there too.
+                var progress = new Progress<AgentActivity>(OnAgentActivity);
+                return new AnthropicAgentProvider(_http, anthOpts, progress);
+        }
+    }
 
     // ── Solve ──────────────────────────────────────────────────────────────
     private async void BtnSolve_Click(object sender, RoutedEventArgs e)
@@ -525,6 +627,15 @@ public partial class MainWindow : Window
 
         string display = string.IsNullOrEmpty(ch) ? $"[Analyzing {_files.Count} attached file(s)]" : ch;
         AddMessage("user", display);
+
+        // In agent mode, stage attachments into the toolbox workspace so the file
+        // tools (list_workspace, file_type, strings_extract, ...) can read them.
+        _agentLog = null;
+        if (_agentMode && _files.Count > 0)
+        {
+            string dir = CopyAttachmentsToWorkspace();
+            OnAgentActivity(AgentActivity.Info($"staged {_files.Count} file(s) into workspace: {dir}"));
+        }
 
         string content = ContentBuilder.Build(
             _cat,
@@ -557,6 +668,7 @@ public partial class MainWindow : Window
 
         AddMessage("user", text);
         _conv.AddUser(text);
+        _agentLog = null;
         AddThinking();
 
         await RunCompletion();

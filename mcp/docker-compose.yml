@@ -1,0 +1,41 @@
+services:
+  ctf-toolbox:
+    build: ./server
+    container_name: ctf-toolbox
+
+    # Expose the MCP endpoint on localhost only -- never 0.0.0.0 on the host.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Challenge artifacts are mounted read-only. Drop the files for the current
+    # challenge into ./challenges/ and reference them by name from the tools.
+    volumes:
+      - ./challenges:/workspace:ro
+
+    # Writable scratch space (tool output, pwntools cache) lives only in RAM
+    # and disappears when the container stops.
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+
+    # --- Sandboxing -------------------------------------------------------
+    read_only: true                 # immutable root filesystem
+    user: "10001:10001"             # match the non-root user in the image
+    cap_drop:
+      - ALL                         # no Linux capabilities
+    security_opt:
+      - no-new-privileges:true      # block setuid privilege escalation
+    mem_limit: 1g
+    pids_limit: 256
+    cpus: "1.0"
+
+    networks:
+      - ctfnet
+    restart: unless-stopped
+
+networks:
+  ctfnet:
+    driver: bridge
+    # The http_fetch tool needs outbound access. If a challenge set does NOT
+    # require any network egress, uncomment the next line to cut it off
+    # entirely -- the strongest containment for untrusted artifacts.
+    # internal: true

@@ -2,3 +2,8 @@ bin/
 obj/
 *.user
 .vs/
+
+# CTF challenge artifacts dropped into the MCP toolbox workspace.
+# Keep the folder (and its README) but never commit challenge files.
+mcp/challenges/*
+!mcp/challenges/README.txt

@@ -228,12 +228,32 @@
                     <TextBlock Text="API KEY:" Foreground="{StaticResource MutedBrush}"
                                FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
                                VerticalAlignment="Center" Margin="8,0,6,0"/>
-                    <PasswordBox x:Name="PbAnthropicKey" Width="280"
+                    <PasswordBox x:Name="PbAnthropicKey" Width="240"
                                  Background="{StaticResource Srf2Brush}"
                                  Foreground="{StaticResource TextBrush}"
                                  BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
                                  FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
                                  Padding="6,4"/>
+
+                    <!-- Agent mode toggle: Claude drives the MCP toolbox tools -->
+                    <CheckBox x:Name="ChkAgent" Content="Agent mode"
+                              Foreground="{StaticResource MutedBrush}"
+                              FontFamily="Segoe UI" FontSize="11"
+                              VerticalAlignment="Center" Cursor="Hand"
+                              Margin="14,0,0,0"
+                              Checked="ChkAgent_Changed" Unchecked="ChkAgent_Changed"/>
+
+                    <StackPanel x:Name="AgentCfg" Orientation="Horizontal"
+                                VerticalAlignment="Center" Visibility="Collapsed">
+                        <TextBlock Text="MCP:" Foreground="{StaticResource MutedBrush}"
+                                   FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                                   VerticalAlignment="Center" Margin="8,0,6,0"/>
+                        <TextBox x:Name="TbMcpUrl" Text="http://localhost:8000/mcp" Width="190"
+                                 Background="{StaticResource Srf2Brush}" Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                                 Padding="6,3" CaretBrush="{StaticResource AccentBrush}"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Ollama config -->

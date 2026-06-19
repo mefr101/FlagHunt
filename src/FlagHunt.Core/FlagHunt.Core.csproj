@@ -8,4 +8,10 @@
     <RootNamespace>FlagHunt.Core</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Official MCP C# SDK. Used by AnthropicAgentProvider to discover and call
+         the CTF toolbox tools exposed by the containerised FastMCP server. -->
+    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+  </ItemGroup>
+
 </Project>

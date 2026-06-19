@@ -1,0 +1,3 @@
+mcp[cli]>=1.2
+pwntools>=4.11
+requests>=2.31

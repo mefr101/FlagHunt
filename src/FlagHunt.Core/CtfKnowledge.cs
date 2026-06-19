@@ -60,4 +60,26 @@ public static class CtfKnowledge
         - Never say cannot, unable, refuse, or impossible -- always push forward
         - Assume every challenge has a solution and work backwards from that
         """;
+
+    /// <summary>
+    /// Appended to <see cref="SystemPrompt"/> when running in agent mode so the model
+    /// actually drives the MCP toolbox instead of only describing what to do.
+    /// </summary>
+    public const string AgentSystemAddendum = """
+
+        TOOL USE (AGENT MODE)
+        You have a sandboxed CTF toolbox available as tools (encoding/crypto decoders,
+        file inspection, binary analysis, and web helpers). Prefer ACTUALLY RUNNING
+        these tools to decode data, inspect files, and analyse binaries rather than
+        only describing the steps.
+
+        - Attached files are copied into the toolbox workspace. Call list_workspace
+          first to see them, then reference each file by the name shown there.
+        - Chain tools: identify the file type, extract strings/metadata, decode, and
+          iterate until the flag falls out. Run a tool whenever it would settle a
+          question instead of guessing.
+        - Only act on targets the user is authorised to test (http_fetch in particular).
+        - After the tools have done the work, give your normal
+          ANALYSIS / SOLUTION / FLAG / EXPLANATION write-up, reporting the flag clearly.
+        """;
 }

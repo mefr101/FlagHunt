@@ -27,7 +27,16 @@ src/
     App.xaml                   Color palette resources
     MainWindow.xaml            Layout
     MainWindow.xaml.cs         UI logic; delegates all AI work to FlagHunt.Core
+mcp/                           Optional MCP toolbox for agent mode (see below)
+  docker-compose.yml           Runs the toolbox with sandboxing flags
+  server/server.py             FastMCP server + the benign CTF analysis tools
+  challenges/                  Attached files are staged here (mounted read-only)
 ```
+
+In addition to single-shot chat, the Anthropic path has an optional **agent mode**:
+`FlagHunt.Core` connects to the MCP toolbox (`Mcp/McpToolbox.cs`) and
+`Providers/AnthropicAgentProvider.cs` runs a tool-use loop so Claude actually
+*runs* decoders and file inspectors instead of only describing them.
 
 The frontend contains no HTTP/JSON/prompt logic — it reads the UI configuration, asks
 `FlagHunt.Core` to build the request and run the selected provider, then renders the result.
@@ -111,6 +120,48 @@ Use **clear** to start a fresh session and **copy all** to copy the full convers
 
 ---
 
+## Agent mode (MCP toolbox)
+
+Single-shot chat tells you *how* to solve a challenge. **Agent mode** lets Claude
+*do* it: a sandboxed [MCP](https://modelcontextprotocol.io) server exposes benign
+CTF analysis tools (encoding/crypto decoders, `file`/`strings`/`binwalk`/`exiftool`/
+`steghide`, image & audio LSB stego via `zsteg`/`wav_lsb_extract`, pcap triage and
+stream reassembly via `tshark`, `objdump`/`checksec`/pwntools, `jwt_decode`/`http_fetch`),
+and FlagHunt
+runs a tool-use loop — call the model, run whatever tools it asks for, feed the
+results back, repeat — until the flag drops out. Tool calls stream live into the
+conversation as they run.
+
+The toolbox ships no exploit code, only analysis primitives; the model composes them.
+
+### 1. Start the toolbox
+
+```bash
+cd mcp
+docker compose up --build
+```
+
+This builds the sandboxed image and serves the Streamable HTTP endpoint at
+`http://localhost:8000/mcp` (localhost only). The container runs non-root with a
+read-only root filesystem, all Linux capabilities dropped, and resource caps;
+challenge files are mounted **read-only**. See [mcp/README.md](mcp/README.md) for
+the full security model and how to cut off network egress.
+
+> Requires Docker + Docker Compose. Agent mode only changes the **Anthropic**
+> path; Ollama and Cursor stay single-shot.
+
+### 2. Turn on agent mode
+
+- Select **Anthropic** and paste your API key.
+- Tick **Agent mode**. The **MCP** endpoint defaults to `http://localhost:8000/mcp`.
+- Attach files and/or paste the challenge, then **SOLVE CHALLENGE**.
+
+Attached files are copied into the toolbox workspace (`mcp/challenges/`) so the
+file tools can read them by name. FlagHunt locates that folder automatically; you
+can override it with the `FLAGHUNT_CHALLENGES_DIR` environment variable.
+
+---
+
 ## Categories
 
 | Category   | What it covers                                          |
@@ -141,3 +192,9 @@ Use **clear** to start a fresh session and **copy all** to copy the full convers
 
 **Cursor AI key error**
 → Get a key at cursor.com/settings and confirm the selected model is available to your account.
+
+**Agent mode: "Cannot reach the MCP toolbox"**
+→ Start it first with `cd mcp && docker compose up --build`, and confirm the **MCP**
+field matches the endpoint (default `http://localhost:8000/mcp`). The server binds to
+`0.0.0.0` inside the container so Docker's published port works; if you customise it,
+keep it reachable from the host.
