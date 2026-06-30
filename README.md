@@ -79,11 +79,25 @@ dotnet publish src/FlagHunt.App -c Release -r win-x64
 # Self-contained single .exe (large; no runtime install needed on the target)
 dotnet publish src/FlagHunt.App -c Release -r win-x64 `
   --self-contained true `
-  -p:PublishSingleFile=true
+  -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
 The resulting `FlagHunt.exe` is written under
 `src/FlagHunt.App/bin/Release/net8.0-windows/win-x64/publish/`.
+
+**Notes for the self-contained build:**
+
+- It is not a *strictly* single file — WPF's native libraries can't all be
+  embedded, so a few DLLs may sit beside the `.exe`.
+  `-p:IncludeNativeLibrariesForSelfExtract=true` pulls as many as possible into
+  the executable (they're unpacked to a temp folder at launch).
+- Expect roughly **~150 MB**: a self-contained build bundles the entire .NET
+  runtime. If the target machines already have the **.NET 8 Desktop Runtime**,
+  use the framework-dependent build above for a much smaller output.
+- **Do not enable trimming** (`-p:PublishTrimmed=true`) for this app. WPF relies
+  heavily on reflection, and trimming routinely breaks XAML loading and data
+  binding at runtime.
 
 ---
 
