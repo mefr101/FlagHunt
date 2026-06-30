@@ -42,7 +42,13 @@
       "Bash(MSYS_NO_PATHCONV=1 docker exec ctf-toolbox sh -lc 'ls -la /tmp/ 2>&1; echo \"--- mount ---\"; mount | grep \" /tmp \"')",
       "Bash(MSYS_NO_PATHCONV=1 docker exec -i ctf-toolbox python3 -)",
       "Bash(MSYS_NO_PATHCONV=1 docker exec ctf-toolbox text2pcap -T 40000,21 /tmp/chat.txt /tmp/chat.pcap)",
-      "Bash(MSYS_NO_PATHCONV=1 docker exec ctf-toolbox ls /tmp)"
+      "Bash(MSYS_NO_PATHCONV=1 docker exec ctf-toolbox ls /tmp)",
+      "PowerShell(Get-Command dotnet -ErrorAction SilentlyContinue)",
+      "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" build \"C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt\\\\FlagHunt.slnx\" --configuration Release 2>&1)",
+      "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" --list-sdks)",
+      "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" --list-runtimes)",
+      "PowerShell(\"----runtimes----\")",
+      "PowerShell(dotnet build \"C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt\\\\FlagHunt.slnx\" -c Debug --nologo 2>&1)"
     ]
   }
 }

@@ -3,8 +3,15 @@
 A sandboxed toolbox for an AI agent that helps solve Capture-the-Flag
 challenges. A containerised **MCP server** (Python / FastMCP) exposes
 general-purpose analysis utilities; a small **C# client** discovers those tools,
-drives an Anthropic model through an agent loop, and runs whatever the model
-asks for.
+drives a model through an agent loop, and runs whatever the model asks for.
+
+The toolbox is **model-agnostic**: the FlagHunt app can drive it with either the
+Anthropic API (`AnthropicAgentProvider`) or a fully-local LM Studio model
+(`LmStudioAgentProvider`). The only difference is the tool-call wire format
+(Anthropic `tool_use` vs OpenAI `tool_calls`); the server, tools, and sandbox
+are identical. Tool calling with LM Studio requires a function-calling-capable
+model (e.g. Qwen2.5-Instruct, Llama-3.1-Instruct) loaded with the local server
+enabled.
 
 ```
 ctf-mcp-toolbox/
@@ -22,11 +29,12 @@ ctf-mcp-toolbox/
 
 ## How the pieces fit
 
-The model lives behind the Anthropic API and decides *which* tool to call. The
-**agent loop in `Program.cs`** is what actually runs: it calls the model, gets
-back `tool_use` requests, dispatches them to the MCP server, feeds the
-`tool_result` back, and repeats until the model stops. The **MCP server** has no
-model and no loop — it is just a well-described, sandboxed set of utilities.
+The model decides *which* tool to call. The **agent loop** (in the app's
+`AnthropicAgentProvider` / `LmStudioAgentProvider`) is what actually runs: it
+calls the model, gets back tool-call requests, dispatches them to the MCP
+server, feeds the results back, and repeats until the model stops. The **MCP
+server** has no model and no loop — it is just a well-described, sandboxed set
+of utilities, so the same server backs both providers.
 
 ## Prerequisites
 

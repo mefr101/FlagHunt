@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private string _cat = "auto";
     private bool _loading;
     private bool _agentMode;
+    private bool _lmStudioAgentMode;
     private StackPanel? _agentLog;
     private readonly Dictionary<string, Button> _catBtns = [];
 
@@ -84,6 +85,7 @@ public partial class MainWindow : Window
         AnthropicCfg.Visibility = Visibility.Visible;
         OllamaCfg.Visibility = Visibility.Collapsed;
         CursorCfg.Visibility = Visibility.Collapsed;
+        LmStudioCfg.Visibility = Visibility.Collapsed;
         SetStatus("anthropic  ready", "#00E5B0");
     }
 
@@ -94,6 +96,7 @@ public partial class MainWindow : Window
         AnthropicCfg.Visibility = Visibility.Collapsed;
         OllamaCfg.Visibility = Visibility.Visible;
         CursorCfg.Visibility = Visibility.Collapsed;
+        LmStudioCfg.Visibility = Visibility.Collapsed;
         SetStatus("ollama  connecting...", "#9B6DFF");
         _ = FetchOllamaModels();
     }
@@ -104,8 +107,21 @@ public partial class MainWindow : Window
         _provider = "cursor";
         AnthropicCfg.Visibility = Visibility.Collapsed;
         OllamaCfg.Visibility = Visibility.Collapsed;
+        LmStudioCfg.Visibility = Visibility.Collapsed;
         CursorCfg.Visibility = Visibility.Visible;
         SetStatus("cursor ai  ready", "#E879F9");
+    }
+
+    private void RbLmStudio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (LmStudioCfg is null) return;
+        _provider = "lmstudio";
+        AnthropicCfg.Visibility = Visibility.Collapsed;
+        OllamaCfg.Visibility = Visibility.Collapsed;
+        CursorCfg.Visibility = Visibility.Collapsed;
+        LmStudioCfg.Visibility = Visibility.Visible;
+        SetStatus("lm studio  connecting...", "#FF6B35");
+        _ = FetchLmStudioModels();
     }
 
     // ── Agent mode toggle ──────────────────────────────────────────────────
@@ -115,6 +131,14 @@ public partial class MainWindow : Window
         _agentMode = ChkAgent.IsChecked == true;
         AgentCfg.Visibility = _agentMode ? Visibility.Visible : Visibility.Collapsed;
         SetStatus(_agentMode ? "anthropic  agent mode (MCP tools)" : "anthropic  ready", "#00E5B0");
+    }
+
+    private void ChkLmStudioAgent_Changed(object sender, RoutedEventArgs e)
+    {
+        if (LmStudioAgentCfg is null) return;
+        _lmStudioAgentMode = ChkLmStudioAgent.IsChecked == true;
+        LmStudioAgentCfg.Visibility = _lmStudioAgentMode ? Visibility.Visible : Visibility.Collapsed;
+        SetStatus(_lmStudioAgentMode ? "lm studio  agent mode (MCP tools)" : "lm studio  ready", "#FF6B35");
     }
 
     // ── Ollama model fetch (delegates to backend) ──────────────────────────
@@ -134,6 +158,24 @@ public partial class MainWindow : Window
 
     private async void BtnFetchModels_Click(object sender, RoutedEventArgs e)
         => await FetchOllamaModels();
+
+    // ── LM Studio model fetch ──────────────────────────────────────────────
+    private async Task FetchLmStudioModels()
+    {
+        var names = await LmStudioProvider.FetchModelsAsync(_http, TbLmStudioHost.Text);
+        if (names.Count == 0)
+        {
+            SetStatus("lm studio: no models loaded -- start the local server in LM Studio", "#FF3B5C");
+            return;
+        }
+        CbLmStudioModel.ItemsSource = names;
+        if (!names.Contains(CbLmStudioModel.Text))
+            CbLmStudioModel.Text = names[0];
+        SetStatus($"lm studio  {names.Count} model(s) ready", "#FF6B35");
+    }
+
+    private async void BtnFetchLmStudioModels_Click(object sender, RoutedEventArgs e)
+        => await FetchLmStudioModels();
 
     // ── Category selection ─────────────────────────────────────────────────
     private void SelectCategory(string val)
@@ -330,16 +372,19 @@ public partial class MainWindow : Window
         string roleLabel = role == "user" ? "YOU" :
                            _provider == "ollama" ? $"OLLAMA  {CbOllamaModel.Text}" :
                            _provider == "cursor" ? $"CURSOR AI  {CbCursorModel.Text}" :
+                           _provider == "lmstudio" ? $"LM STUDIO  {CbLmStudioModel.Text}{(_lmStudioAgentMode ? " (agent)" : "")}" :
                            _agentMode ? "AI SOLVER  claude (agent)" : "AI SOLVER  claude";
 
         string roleHex = role == "user" ? "#4488FF" :
                           _provider == "ollama" ? "#9B6DFF" :
-                          _provider == "cursor" ? "#E879F9" : "#00E5B0";
+                          _provider == "cursor" ? "#E879F9" :
+                          _provider == "lmstudio" ? "#FF6B35" : "#00E5B0";
 
         string bodyBg = role == "user" ? "#0E1420" : "#12151C";
         string bodyBorder = role == "user" ? "#4488FF" :
                             _provider == "ollama" ? "#9B6DFF" :
-                            _provider == "cursor" ? "#E879F9" : "#252D40";
+                            _provider == "cursor" ? "#E879F9" :
+                            _provider == "lmstudio" ? "#FF6B35" : "#252D40";
 
         var outer = new StackPanel { Margin = new Thickness(20, 0, 20, 12) };
 
@@ -440,7 +485,7 @@ public partial class MainWindow : Window
     private void AddThinking()
     {
         RemoveWelcome();
-        string rc = _provider == "ollama" ? "#9B6DFF" : _provider == "cursor" ? "#E879F9" : "#00E5B0";
+        string rc = _provider == "ollama" ? "#9B6DFF" : _provider == "cursor" ? "#E879F9" : _provider == "lmstudio" ? "#FF6B35" : "#00E5B0";
 
         var outer = new StackPanel { Margin = new Thickness(20, 0, 20, 12), Tag = "thinking" };
 
@@ -595,6 +640,15 @@ public partial class MainWindow : Window
                 return new OllamaProvider(_http, new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim()));
             case "cursor":
                 return new CursorProvider(_http, new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim()));
+            case "lmstudio":
+                var lmOpts = new LmStudioOptions(TbLmStudioHost.Text, CbLmStudioModel.Text.Trim());
+                if (!_lmStudioAgentMode)
+                    return new LmStudioProvider(_http, lmOpts);
+
+                lmOpts = lmOpts with { UseTools = true, McpUrl = TbLmStudioMcpUrl.Text.Trim() };
+                // Progress is captured on the UI thread, so handlers run there too.
+                var lmProgress = new Progress<AgentActivity>(OnAgentActivity);
+                return new LmStudioAgentProvider(_http, lmOpts, lmProgress);
             default:
                 var anthOpts = new AnthropicOptions(PbAnthropicKey.Password);
                 if (!_agentMode)
@@ -631,7 +685,9 @@ public partial class MainWindow : Window
         // In agent mode, stage attachments into the toolbox workspace so the file
         // tools (list_workspace, file_type, strings_extract, ...) can read them.
         _agentLog = null;
-        if (_agentMode && _files.Count > 0)
+        bool agentActive = (_provider == "anthropic" && _agentMode)
+                           || (_provider == "lmstudio" && _lmStudioAgentMode);
+        if (agentActive && _files.Count > 0)
         {
             string dir = CopyAttachmentsToWorkspace();
             OnAgentActivity(AgentActivity.Info($"staged {_files.Count} file(s) into workspace: {dir}"));

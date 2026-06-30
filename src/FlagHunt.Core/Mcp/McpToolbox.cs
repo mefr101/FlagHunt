@@ -54,6 +54,27 @@ public sealed class McpToolbox : IAsyncDisposable
         return arr;
     }
 
+    /// <summary>Translates the discovered tools into the OpenAI chat-completions tool schema
+    /// (used by LM Studio and other OpenAI-compatible servers).</summary>
+    public JsonArray ToOpenAiTools()
+    {
+        var arr = new JsonArray();
+        foreach (var tool in Tools)
+        {
+            arr.Add(new JsonObject
+            {
+                ["type"] = "function",
+                ["function"] = new JsonObject
+                {
+                    ["name"] = tool.Name,
+                    ["description"] = tool.Description ?? "",
+                    ["parameters"] = JsonNode.Parse(tool.JsonSchema.GetRawText()),
+                },
+            });
+        }
+        return arr;
+    }
+
     /// <summary>Runs a single tool and returns its combined text output.</summary>
     public async Task<string> CallAsync(string name, IReadOnlyDictionary<string, object?> arguments, CancellationToken ct = default)
     {

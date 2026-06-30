@@ -4,10 +4,11 @@ A Windows desktop app that sends Capture-The-Flag challenges (text, code, files)
 AI model and renders the analysis, solution, flag, and explanation. Built with C# / .NET 8
 (WPF) with a clean **frontend / backend split**.
 
-Supports three providers:
+Supports four providers:
 
 - **Anthropic** (cloud) — Claude
 - **Ollama** (local / offline)
+- **LM Studio** (local / offline) — any model loaded in LM Studio's OpenAI-compatible server
 - **Cursor AI** (cloud)
 
 ---
@@ -22,7 +23,7 @@ src/
     CtfKnowledge.cs            System prompt + category list
     Conversation.cs            Message-history state
     ContentBuilder.cs          Packs challenge text + attachments into a prompt
-    Providers/                 IChatProvider + Anthropic / Ollama / Cursor
+    Providers/                 IChatProvider + Anthropic / Ollama / LM Studio / Cursor
   FlagHunt.App/                Frontend — WPF GUI (net8.0-windows), references Core
     App.xaml                   Color palette resources
     MainWindow.xaml            Layout
@@ -33,10 +34,13 @@ mcp/                           Optional MCP toolbox for agent mode (see below)
   challenges/                  Attached files are staged here (mounted read-only)
 ```
 
-In addition to single-shot chat, the Anthropic path has an optional **agent mode**:
-`FlagHunt.Core` connects to the MCP toolbox (`Mcp/McpToolbox.cs`) and
-`Providers/AnthropicAgentProvider.cs` runs a tool-use loop so Claude actually
-*runs* decoders and file inspectors instead of only describing them.
+In addition to single-shot chat, the **Anthropic** and **LM Studio** paths have an
+optional **agent mode**: `FlagHunt.Core` connects to the MCP toolbox
+(`Mcp/McpToolbox.cs`) and runs a tool-use loop so the model actually *runs*
+decoders and file inspectors instead of only describing them.
+`Providers/AnthropicAgentProvider.cs` drives Claude (Anthropic `tool_use` format)
+and `Providers/LmStudioAgentProvider.cs` drives a local model (OpenAI `tool_calls`
+format) — both reuse the same sandboxed toolbox.
 
 The frontend contains no HTTP/JSON/prompt logic — it reads the UI configuration, asks
 `FlagHunt.Core` to build the request and run the selected provider, then renders the result.
@@ -49,7 +53,8 @@ The backend has no WPF reference, so it can be reused from a CLI or web host.
 - Windows 10 or 11
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (or newer) to build
 - The .NET 8 Desktop Runtime to run a published build on another machine
-- Internet connection for Anthropic / Cursor, or [Ollama](https://ollama.com) running locally
+- Internet connection for Anthropic / Cursor, or [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) running locally
+- For **LM Studio agent mode**: a function-calling-capable model loaded (e.g. Qwen2.5-Instruct, Llama-3.1-Instruct) plus Docker for the toolbox
 
 ---
 
@@ -98,6 +103,13 @@ The resulting `FlagHunt.exe` is written under
 - Select **Ollama (local)**, then click **fetch** to load your installed models
 - Good CTF models: `llama3`, `deepseek-r1`, `qwen2.5-coder`, `mistral`
 
+**LM Studio (local / offline)**
+- Install [LM Studio](https://lmstudio.ai) and download a model.
+- Start its OpenAI-compatible server: **Developer / Local Server** tab → **Start** (defaults to `http://localhost:1234`).
+- Select **LM Studio (local)**, then click **fetch** to load the models currently served.
+- The dropdown lists every served model, including embedding models — pick a **chat/instruct** model, not an embedding one.
+- For **agent mode** (below) the model must support **function/tool calling** (e.g. Qwen2.5-Instruct, Llama-3.1-Instruct).
+
 **Cursor AI (cloud)**
 - Select **Cursor AI**
 - Paste your API key (from [cursor.com/settings](https://cursor.com/settings))
@@ -122,9 +134,9 @@ Use **clear** to start a fresh session and **copy all** to copy the full convers
 
 ## Agent mode (MCP toolbox)
 
-Single-shot chat tells you *how* to solve a challenge. **Agent mode** lets Claude
-*do* it: a sandboxed [MCP](https://modelcontextprotocol.io) server exposes benign
-CTF analysis tools (encoding/crypto decoders, `file`/`strings`/`binwalk`/`exiftool`/
+Single-shot chat tells you *how* to solve a challenge. **Agent mode** lets the
+model *do* it: a sandboxed [MCP](https://modelcontextprotocol.io) server exposes
+benign CTF analysis tools (encoding/crypto decoders, `file`/`strings`/`binwalk`/`exiftool`/
 `steghide`, image & audio LSB stego via `zsteg`/`wav_lsb_extract`, pcap triage and
 stream reassembly via `tshark`, `objdump`/`checksec`/pwntools, `jwt_decode`/`http_fetch`),
 and FlagHunt
@@ -132,7 +144,10 @@ runs a tool-use loop — call the model, run whatever tools it asks for, feed th
 results back, repeat — until the flag drops out. Tool calls stream live into the
 conversation as they run.
 
-The toolbox ships no exploit code, only analysis primitives; the model composes them.
+Agent mode works with both **Anthropic** (Claude, cloud) and **LM Studio** (a
+local model, fully offline). Both drive the *same* toolbox; only the tool-call
+wire format differs (Anthropic `tool_use` vs OpenAI `tool_calls`). The toolbox
+ships no exploit code, only analysis primitives; the model composes them.
 
 ### 1. Start the toolbox
 
@@ -147,18 +162,31 @@ read-only root filesystem, all Linux capabilities dropped, and resource caps;
 challenge files are mounted **read-only**. See [mcp/README.md](mcp/README.md) for
 the full security model and how to cut off network egress.
 
-> Requires Docker + Docker Compose. Agent mode only changes the **Anthropic**
-> path; Ollama and Cursor stay single-shot.
+> Requires Docker + Docker Compose. Agent mode is available on the **Anthropic**
+> and **LM Studio** paths; Ollama and Cursor stay single-shot.
 
 ### 2. Turn on agent mode
 
+**With Anthropic (Claude, cloud):**
 - Select **Anthropic** and paste your API key.
 - Tick **Agent mode**. The **MCP** endpoint defaults to `http://localhost:8000/mcp`.
 - Attach files and/or paste the challenge, then **SOLVE CHALLENGE**.
 
-Attached files are copied into the toolbox workspace (`mcp/challenges/`) so the
-file tools can read them by name. FlagHunt locates that folder automatically; you
-can override it with the `FLAGHUNT_CHALLENGES_DIR` environment variable.
+**With LM Studio (local, offline):**
+- Start LM Studio's local server with a **function-calling-capable** model loaded
+  (e.g. Qwen2.5-Instruct, Llama-3.1-Instruct). Plain chat/base models won't call tools.
+- Select **LM Studio (local)** and click **fetch**; pick the loaded model.
+- Tick **Agent mode**. The **MCP** endpoint defaults to `http://localhost:8000/mcp`.
+- Attach files and/or paste the challenge, then **SOLVE CHALLENGE**.
+
+In both cases attached files are copied into the toolbox workspace (`mcp/challenges/`)
+so the file tools can read them by name. FlagHunt locates that folder automatically;
+you can override it with the `FLAGHUNT_CHALLENGES_DIR` environment variable.
+
+> **Tip:** to confirm the whole loop end to end, drop a file with a base64 blob into
+> `mcp/challenges/` and ask *"There's a file `secret.txt` in the workspace. Find the
+> flag."* A passing run shows live `list_workspace` → `base64_decode` tool calls in
+> the AGENT card before the answer.
 
 ---
 
@@ -186,6 +214,16 @@ can override it with the `FLAGHUNT_CHALLENGES_DIR` environment variable.
 
 **"Cannot reach Ollama"**
 → Make sure `ollama serve` is running and the **HOST** field matches (default `http://localhost:11434`).
+
+**"Cannot reach LM Studio" / empty model list**
+→ Start LM Studio's local server (Developer / Local Server → Start) and confirm the
+**HOST** field matches (default `http://localhost:1234`). Click **fetch** after a
+model is loaded.
+
+**LM Studio agent mode: model answers in prose but never calls a tool**
+→ The loaded model doesn't support function calling. Load a tool-capable instruct
+model (Qwen2.5-Instruct, Llama-3.1-Instruct). FlagHunt also prints a hint when a run
+finishes without any tool call.
 
 **Anthropic API key error**
 → Check the key at console.anthropic.com — it should start with `sk-ant-`.

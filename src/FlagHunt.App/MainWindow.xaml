@@ -222,6 +222,9 @@
                 <RadioButton x:Name="RbCursor"   Content="Cursor AI"
                              Style="{StaticResource ProviderRb}"
                              Checked="RbCursor_Checked"/>
+                <RadioButton x:Name="RbLmStudio" Content="LM Studio  (local)"
+                             Style="{StaticResource ProviderRb}"
+                             Checked="RbLmStudio_Checked"/>
 
                 <!-- Anthropic config -->
                 <StackPanel x:Name="AnthropicCfg" Orientation="Horizontal" VerticalAlignment="Center">
@@ -280,6 +283,52 @@
                             Background="{StaticResource Srf2Brush}"
                             Foreground="{StaticResource PurpleBrush}"
                             BorderThickness="0" FontFamily="Segoe UI" FontSize="10"/>
+                </StackPanel>
+
+                <!-- LM Studio config -->
+                <StackPanel x:Name="LmStudioCfg" Orientation="Horizontal"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                    <TextBlock Text="HOST:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="8,0,6,0"/>
+                    <TextBox x:Name="TbLmStudioHost" Text="http://localhost:1234" Width="170"
+                             Background="{StaticResource Srf2Brush}" Foreground="{StaticResource TextBrush}"
+                             BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                             FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                             Padding="6,3" CaretBrush="{StaticResource AccentBrush}"/>
+                    <TextBlock Text="  MODEL:" Foreground="{StaticResource MutedBrush}"
+                               FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="CbLmStudioModel" Width="200" IsEditable="True"
+                              Background="White" Foreground="#000000"
+                              BorderBrush="{StaticResource BdrBrush}"
+                              FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                              Text=""/>
+                    <Button Content=" fetch " Margin="8,0,0,0" Padding="8,3"
+                            Click="BtnFetchLmStudioModels_Click" Cursor="Hand"
+                            Background="{StaticResource Srf2Brush}"
+                            Foreground="#FF6B35"
+                            BorderThickness="0" FontFamily="Segoe UI" FontSize="10"/>
+
+                    <!-- Agent mode toggle: the local model drives the MCP toolbox tools -->
+                    <CheckBox x:Name="ChkLmStudioAgent" Content="Agent mode"
+                              Foreground="{StaticResource MutedBrush}"
+                              FontFamily="Segoe UI" FontSize="11"
+                              VerticalAlignment="Center" Cursor="Hand"
+                              Margin="14,0,0,0"
+                              Checked="ChkLmStudioAgent_Changed" Unchecked="ChkLmStudioAgent_Changed"/>
+
+                    <StackPanel x:Name="LmStudioAgentCfg" Orientation="Horizontal"
+                                VerticalAlignment="Center" Visibility="Collapsed">
+                        <TextBlock Text="MCP:" Foreground="{StaticResource MutedBrush}"
+                                   FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
+                                   VerticalAlignment="Center" Margin="8,0,6,0"/>
+                        <TextBox x:Name="TbLmStudioMcpUrl" Text="http://localhost:8000/mcp" Width="190"
+                                 Background="{StaticResource Srf2Brush}" Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource BdrBrush}" BorderThickness="1"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="11"
+                                 Padding="6,3" CaretBrush="{StaticResource AccentBrush}"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Cursor AI config -->
