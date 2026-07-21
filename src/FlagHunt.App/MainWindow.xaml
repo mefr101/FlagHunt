@@ -480,6 +480,8 @@
                                    FontFamily="Cascadia Code, Consolas, monospace" FontSize="10"
                                    VerticalAlignment="Center" DockPanel.Dock="Left"/>
                         <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                            <Button Content="clear ws" Style="{StaticResource SmallBtn}" Click="BtnClearWorkspace_Click"
+                                    ToolTip="Delete challenge files staged in the MCP toolbox workspace (mcp/challenges)"/>
                             <Button Content="clear"   Style="{StaticResource SmallBtn}" Click="BtnClear_Click"/>
                             <Button Content="copy all" Style="{StaticResource SmallBtn}" Click="BtnCopy_Click"/>
                         </StackPanel>

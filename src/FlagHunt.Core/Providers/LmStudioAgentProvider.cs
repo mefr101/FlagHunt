@@ -25,9 +25,12 @@ public sealed class LmStudioAgentProvider(
 {
     private const int ResultPreviewChars = 600;
 
+    /// <summary>Cap on tool calls dispatched concurrently within a single model turn.</summary>
+    private const int MaxParallelTools = 4;
+
     public string DisplayName => string.IsNullOrWhiteSpace(options.Model) ? "lm-studio (agent)" : $"{options.Model} (agent)";
 
-    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, IProgress<string>? onToken = null, CancellationToken ct = default)
     {
         string host = options.Host.TrimEnd('/');
         string model = options.Model.Trim();
@@ -114,19 +117,20 @@ public sealed class LmStudioAgentProvider(
                 if (!wantsTools || toolCalls is null || toolCalls.Count == 0)
                     break; // nothing more to call -- we're done.
 
-                foreach (var call in toolCalls)
+                sawAnyToolCall = true;
+
+                // Pre-parse every tool call before dispatching. OpenAI delivers arguments as a
+                // JSON *string*; local models sometimes emit malformed or empty JSON, so parse
+                // defensively and feed any failure back to the model as a tool error.
+                var parsed = toolCalls.Select(call =>
                 {
                     var callObj = call!.AsObject();
                     string id = (string?)callObj["id"] ?? "";
                     var fn = callObj["function"]?.AsObject();
                     string name = (string?)fn?["name"] ?? "";
-                    sawAnyToolCall = true;
-
-                    // OpenAI delivers arguments as a JSON *string*; local models sometimes
-                    // emit malformed or empty JSON, so parse defensively and feed any failure
-                    // back to the model as a tool error rather than aborting the run.
-                    var args = new Dictionary<string, object?>();
                     string rawArgs = (string?)fn?["arguments"] ?? "";
+
+                    var args = new Dictionary<string, object?>();
                     string? parseError = null;
                     if (!string.IsNullOrWhiteSpace(rawArgs))
                     {
@@ -142,33 +146,44 @@ public sealed class LmStudioAgentProvider(
                             parseError = $"could not parse arguments JSON: {ex.Message}";
                         }
                     }
+                    return (id, name, rawArgs, args, parseError);
+                }).ToList();
 
-                    progress?.Report(AgentActivity.ToolCall($"{name}({Summarize(rawArgs)})"));
+                foreach (var c in parsed)
+                    progress?.Report(AgentActivity.ToolCall($"{c.name}({Summarize(c.rawArgs)})"));
 
-                    string output;
-                    if (parseError is not null)
+                // Run the turn's tool calls concurrently (capped) -- independent CTF tools then
+                // run in parallel instead of serially. Calls that failed to parse skip the
+                // toolbox and return their error immediately, preserving order.
+                using var gate = new SemaphoreSlim(MaxParallelTools);
+                string[] outputs = await Task.WhenAll(parsed.Select(async c =>
+                {
+                    if (c.parseError is not null)
+                        return $"tool error: {c.parseError}";
+
+                    await gate.WaitAsync(ct).ConfigureAwait(false);
+                    try
                     {
-                        output = $"tool error: {parseError}";
+                        return await toolbox.CallAsync(c.name, c.args, ct).ConfigureAwait(false);
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        try
-                        {
-                            output = await toolbox.CallAsync(name, args, ct).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            output = $"tool error: {ex.Message}";
-                        }
+                        return $"tool error: {ex.Message}";
                     }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                })).ConfigureAwait(false);
 
-                    progress?.Report(AgentActivity.ToolResult(Preview(output)));
-
+                for (int i = 0; i < parsed.Count; i++)
+                {
+                    progress?.Report(AgentActivity.ToolResult(Preview(outputs[i])));
                     messages.Add(new JsonObject
                     {
                         ["role"] = "tool",
-                        ["tool_call_id"] = id,
-                        ["content"] = output,
+                        ["tool_call_id"] = parsed[i].id,
+                        ["content"] = outputs[i],
                     });
                 }
             }

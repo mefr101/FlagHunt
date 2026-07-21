@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -10,7 +11,7 @@ public sealed class OllamaProvider(HttpClient http, OllamaOptions options) : ICh
 {
     public string DisplayName => options.Model;
 
-    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, IProgress<string>? onToken = null, CancellationToken ct = default)
     {
         string host = options.Host.TrimEnd('/');
         string model = options.Model.Trim();
@@ -28,21 +29,56 @@ public sealed class OllamaProvider(HttpClient http, OllamaOptions options) : ICh
         {
             ["model"] = model,
             ["messages"] = msgArr,
-            ["stream"] = false,
+            ["stream"] = true,
             ["options"] = new JsonObject { ["num_predict"] = options.NumPredict, ["temperature"] = options.Temperature }
         };
 
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{host}/api/chat")
+        {
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
+        };
+
+        // Accumulate outside the try so a mid-stream fault (or a user Stop) keeps the partial text.
+        var sb = new StringBuilder();
         try
         {
-            var resp = await http.PostAsync($"{host}/api/chat",
-                new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), ct).ConfigureAwait(false);
-            string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            string text = JsonDocument.Parse(json).RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
-            return ChatResult.Ok(text);
+            var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                string err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return ChatResult.Error($"Ollama Error {(int)resp.StatusCode}: {err[..Math.Min(300, err.Length)]}");
+            }
+
+            // Ollama streams newline-delimited JSON objects (not SSE): one {message:{content},done}
+            // per line, terminated by a final object with "done": true.
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new StreamReader(stream);
+            string? line;
+            while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
+            {
+                if (line.Length == 0) continue;
+
+                JsonNode? obj;
+                try { obj = JsonNode.Parse(line); }
+                catch { continue; }
+
+                string? delta = obj?["message"]?["content"]?.GetValue<string>();
+                if (!string.IsNullOrEmpty(delta)) { sb.Append(delta); onToken?.Report(delta); }
+
+                if (obj?["done"]?.GetValue<bool>() == true) break;
+            }
+
+            return sb.Length > 0
+                ? ChatResult.Ok(sb.ToString())
+                : ChatResult.Error("Ollama returned an empty stream.");
         }
         catch (Exception ex)
         {
-            return ChatResult.Error($"Cannot reach Ollama at {host}\n\nRun: ollama serve\n\nError: {ex.Message}");
+            if (sb.Length > 0)
+                return ChatResult.Ok(sb + "\n\n" + (ct.IsCancellationRequested ? "[stopped]" : $"[stream interrupted: {ex.Message}]"));
+            return ct.IsCancellationRequested
+                ? ChatResult.Ok("[stopped]")
+                : ChatResult.Error($"Cannot reach Ollama at {host}\n\nRun: ollama serve\n\nError: {ex.Message}");
         }
     }
 

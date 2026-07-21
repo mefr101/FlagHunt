@@ -137,7 +137,18 @@ The resulting `FlagHunt.exe` is written under
 4. Hit **SOLVE CHALLENGE**.
 5. Use the follow-up bar at the bottom to ask questions or dig deeper.
 
-Use **clear** to start a fresh session and **copy all** to copy the full conversation.
+The answer **streams in live** as the model generates it (all four providers). While
+a response is running, **SOLVE CHALLENGE** turns into **STOP** — click it to cancel;
+whatever streamed so far is kept.
+
+**Header buttons:**
+
+- **clear ws** — deletes challenge files staged in the MCP toolbox workspace
+  (`mcp/challenges`) so agent-mode runs don't see leftovers from a previous
+  challenge. Keeps the folder's `README.txt`; asks to confirm first; doesn't touch
+  the current attachments or the conversation.
+- **clear** — starts a fresh session (clears the conversation and attachments).
+- **copy all** — copies the full conversation to the clipboard.
 
 ### File attachments
 
@@ -156,7 +167,9 @@ stream reassembly via `tshark`, `objdump`/`checksec`/pwntools, `jwt_decode`/`htt
 and FlagHunt
 runs a tool-use loop — call the model, run whatever tools it asks for, feed the
 results back, repeat — until the flag drops out. Tool calls stream live into the
-conversation as they run.
+conversation as they run, and independent tools requested in the same turn run
+**in parallel**. On the Anthropic path, the system prompt and tool schemas are
+**prompt-cached**, so each loop iteration reprocesses only the new turn.
 
 Agent mode works with both **Anthropic** (Claude, cloud) and **LM Studio** (a
 local model, fully offline). Both drive the *same* toolbox; only the tool-call

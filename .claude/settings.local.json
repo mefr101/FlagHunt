@@ -48,7 +48,9 @@
       "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" --list-sdks)",
       "PowerShell(& \"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\" --list-runtimes)",
       "PowerShell(\"----runtimes----\")",
-      "PowerShell(dotnet build \"C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt\\\\FlagHunt.slnx\" -c Debug --nologo 2>&1)"
+      "PowerShell(dotnet build \"C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt\\\\FlagHunt.slnx\" -c Debug --nologo 2>&1)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)"
     ]
   }
 }

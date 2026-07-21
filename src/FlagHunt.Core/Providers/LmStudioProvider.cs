@@ -11,7 +11,7 @@ public sealed class LmStudioProvider(HttpClient http, LmStudioOptions options) :
 {
     public string DisplayName => string.IsNullOrWhiteSpace(options.Model) ? "lm-studio" : options.Model;
 
-    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, IProgress<string>? onToken = null, CancellationToken ct = default)
     {
         string host = options.Host.TrimEnd('/');
         string model = options.Model.Trim();
@@ -30,7 +30,8 @@ public sealed class LmStudioProvider(HttpClient http, LmStudioOptions options) :
             ["model"] = model,
             ["messages"] = msgArr,
             ["max_tokens"] = options.MaxTokens,
-            ["temperature"] = options.Temperature
+            ["temperature"] = options.Temperature,
+            ["stream"] = true,
         };
 
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{host}/v1/chat/completions")
@@ -38,23 +39,51 @@ public sealed class LmStudioProvider(HttpClient http, LmStudioOptions options) :
             Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
         };
 
+        // Accumulate outside the try so a mid-stream fault can still return the partial text.
+        var sb = new StringBuilder();
         try
         {
-            var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
-            string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
+            // ResponseHeadersRead: start reading as the body streams instead of buffering it all.
+            var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return ChatResult.Error($"LM Studio Error {(int)resp.StatusCode}: {ExtractError(json)}");
+            {
+                string err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return ChatResult.Error($"LM Studio Error {(int)resp.StatusCode}: {ExtractError(err)}");
+            }
 
-            string text = JsonDocument.Parse(json).RootElement
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString() ?? "";
-            return ChatResult.Ok(text);
+            await foreach (string data in SseReader.ReadDataLinesAsync(resp, ct).ConfigureAwait(false))
+            {
+                if (data == "[DONE]") break;
+
+                string? delta;
+                try
+                {
+                    // Each frame: {"choices":[{"delta":{"content":"..."}}]}. A trailing frame
+                    // may carry only usage/finish_reason with no content -- skipped below.
+                    delta = JsonNode.Parse(data)?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>();
+                }
+                catch
+                {
+                    continue; // ignore keep-alives / malformed frames
+                }
+
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    sb.Append(delta);
+                    onToken?.Report(delta);
+                }
+            }
+
+            return sb.Length > 0
+                ? ChatResult.Ok(sb.ToString())
+                : ChatResult.Error("LM Studio returned an empty stream. Make sure a chat (non-embedding) model is loaded.");
         }
         catch (Exception ex)
         {
+            if (sb.Length > 0)
+                return ChatResult.Ok(sb + "\n\n" + (ct.IsCancellationRequested ? "[stopped]" : $"[stream interrupted: {ex.Message}]"));
+            if (ct.IsCancellationRequested)
+                return ChatResult.Ok("[stopped]");
             return ChatResult.Error($"Cannot reach LM Studio at {host}\n\nMake sure LM Studio is running with the local server enabled.\n\nError: {ex.Message}");
         }
     }

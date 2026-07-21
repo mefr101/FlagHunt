@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private string _provider = "anthropic";
     private string _cat = "auto";
     private bool _loading;
+    private CancellationTokenSource? _cts;
     private bool _agentMode;
     private bool _lmStudioAgentMode;
     private StackPanel? _agentLog;
@@ -50,6 +51,10 @@ public partial class MainWindow : Window
     private TextBlock? _thinkLbl;
     private int _thinkI;
     private static readonly string[] Dots = ["|", "/", "-", "\\"];
+
+    // Streaming: a timer coalesces token deltas into ~50ms UI re-renders.
+    private DispatcherTimer? _streamTimer;
+    private bool _streamDirty;
 
     public MainWindow()
     {
@@ -367,6 +372,16 @@ public partial class MainWindow : Window
     // ── Message rendering ──────────────────────────────────────────────────
     private void AddMessage(string role, string text)
     {
+        var tb = BeginMessage(role);
+        RenderText(tb, text);
+    }
+
+    /// <summary>
+    /// Builds an empty message frame, adds it to the conversation, and returns its TextBlock so
+    /// the caller can fill it in once (<see cref="AddMessage"/>) or incrementally (streaming).
+    /// </summary>
+    private TextBlock BeginMessage(string role)
+    {
         RemoveWelcome();
 
         string roleLabel = role == "user" ? "YOU" :
@@ -418,12 +433,12 @@ public partial class MainWindow : Window
             LineHeight = 18
         };
 
-        RenderText(tb, text);
         body.Child = tb;
         outer.Children.Add(body);
 
         ConvPanel.Children.Add(outer);
         ChatScroll.ScrollToEnd();
+        return tb;
     }
 
     private static void RenderText(TextBlock tb, string text)
@@ -528,6 +543,34 @@ public partial class MainWindow : Window
         _thinkLbl = null;
     }
 
+    // ── Streaming render ────────────────────────────────────────────────────
+    /// <summary>
+    /// Starts a timer that re-renders <paramref name="target"/> from <paramref name="buffer"/>
+    /// at most every ~50ms while tokens stream in, so a fast token rate can't thrash the UI.
+    /// RenderText re-parses the whole accumulated text each tick, which keeps multi-line
+    /// markdown (code fences, bold, flag highlighting) correct as tokens straddle boundaries.
+    /// </summary>
+    private void StartStreamTimer(TextBlock target, StringBuilder buffer)
+    {
+        _streamDirty = false;
+        _streamTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _streamTimer.Tick += (_, _) =>
+        {
+            if (!_streamDirty) return;
+            _streamDirty = false;
+            target.Inlines.Clear();
+            RenderText(target, buffer.ToString());
+            ChatScroll.ScrollToEnd();
+        };
+        _streamTimer.Start();
+    }
+
+    private void StopStreamTimer()
+    {
+        _streamTimer?.Stop();
+        _streamTimer = null;
+    }
+
     // ── Agent activity log (live MCP tool calls) ────────────────────────────
     /// <summary>Renders one agent event into a live "AGENT" card, creating it on first use.</summary>
     private void OnAgentActivity(AgentActivity a)
@@ -614,6 +657,57 @@ public partial class MainWindow : Window
         SetStatus("cleared  ready", "#5A6A85");
     }
 
+    /// <summary>Deletes challenge files staged into the MCP toolbox workspace (mcp/challenges)
+    /// so the agent's file tools don't see leftovers from a previous challenge. Keeps the
+    /// folder's README.txt. Does not touch the current attachment chips or the conversation.</summary>
+    private void BtnClearWorkspace_Click(object sender, RoutedEventArgs e)
+    {
+        string dir = ResolveChallengesDir();
+        if (!Directory.Exists(dir))
+        {
+            SetStatus("workspace already empty", "#5A6A85");
+            return;
+        }
+
+        // Everything staged for the toolbox, minus the README the folder ships with.
+        var entries = Directory.EnumerateFileSystemEntries(dir)
+            .Where(p => !string.Equals(Path.GetFileName(p), "README.txt", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (entries.Count == 0)
+        {
+            SetStatus("workspace already empty", "#5A6A85");
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Delete {entries.Count} staged item(s) from the toolbox workspace?\n\n{dir}\n\nThis cannot be undone.",
+            "Clear workspace", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        int removed = 0;
+        var failures = new List<string>();
+        foreach (var p in entries)
+        {
+            try
+            {
+                if (Directory.Exists(p)) Directory.Delete(p, recursive: true);
+                else File.Delete(p);
+                removed++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{Path.GetFileName(p)}: {ex.Message}");
+            }
+        }
+
+        if (failures.Count > 0)
+            MessageBox.Show("Some items could not be deleted:\n\n" + string.Join("\n", failures),
+                            "Clear workspace", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+        SetStatus($"cleared {removed} item(s) from workspace", "#00E5B0");
+    }
+
     private void BtnCopy_Click(object sender, RoutedEventArgs e)
     {
         var sb = new StringBuilder();
@@ -661,10 +755,30 @@ public partial class MainWindow : Window
         }
     }
 
+    // ── Busy state (also turns the Solve button into a Stop control) ────────
+    private void EnterBusy()
+    {
+        _loading = true;
+        _cts = new CancellationTokenSource();
+        BtnSolve.Content = "  STOP";
+        BtnSolve.IsEnabled = true;   // stays clickable so a click cancels the run
+        BtnSend.IsEnabled = false;
+    }
+
+    private void ExitBusy()
+    {
+        _loading = false;
+        _cts?.Dispose();
+        _cts = null;
+        BtnSolve.Content = "SOLVE CHALLENGE";
+        BtnSolve.IsEnabled = true;
+        BtnSend.IsEnabled = true;
+    }
+
     // ── Solve ──────────────────────────────────────────────────────────────
     private async void BtnSolve_Click(object sender, RoutedEventArgs e)
     {
-        if (_loading) return;
+        if (_loading) { _cts?.Cancel(); return; }   // second click = Stop
 
         string ch = _chPh ? "" : ChallengeTxt.Text.Trim();
         if (string.IsNullOrEmpty(ch) && _files.Count == 0)
@@ -674,9 +788,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _loading = true;
-        BtnSolve.IsEnabled = false;
-        BtnSolve.Content = "  Analyzing...";
+        EnterBusy();
         SetStatus("running...", "#FFC14D");
 
         string display = string.IsNullOrEmpty(ch) ? $"[Analyzing {_files.Count} attached file(s)]" : ch;
@@ -700,12 +812,11 @@ public partial class MainWindow : Window
         _conv.AddUser(content);
         AddThinking();
 
-        await RunCompletion();
+        await RunCompletion(_cts!.Token);
 
-        _loading = false;
-        BtnSolve.IsEnabled = true;
-        BtnSolve.Content = "SOLVE CHALLENGE";
-        SetStatus("complete  ready", "#00E5B0");
+        bool stopped = _cts?.IsCancellationRequested == true;
+        ExitBusy();
+        SetStatus(stopped ? "stopped  ready" : "complete  ready", stopped ? "#FFC14D" : "#00E5B0");
     }
 
     // ── Follow-up ──────────────────────────────────────────────────────────
@@ -719,42 +830,86 @@ public partial class MainWindow : Window
         FuEntry.Foreground = B("#5A6A85");
         _fuPh = true;
 
-        _loading = true;
-        BtnSend.IsEnabled = false;
+        EnterBusy();
 
         AddMessage("user", text);
         _conv.AddUser(text);
         _agentLog = null;
         AddThinking();
 
-        await RunCompletion();
+        await RunCompletion(_cts!.Token);
 
-        _loading = false;
-        BtnSend.IsEnabled = true;
-        SetStatus("ready", "#00E5B0");
+        bool stopped = _cts?.IsCancellationRequested == true;
+        ExitBusy();
+        SetStatus(stopped ? "stopped  ready" : "ready", stopped ? "#FFC14D" : "#00E5B0");
     }
 
-    /// <summary>Runs the configured provider against the current history and renders the reply.</summary>
-    private async Task RunCompletion()
+    /// <summary>Runs the configured provider against the current history and renders the reply,
+    /// streaming tokens into a live message frame when the provider supports it.</summary>
+    private async Task RunCompletion(CancellationToken ct)
     {
         var provider = BuildProvider();
+        var sb = new StringBuilder();
+        TextBlock? live = null;
+
+        // Progress is created on the UI thread, so this callback runs there too -- safe to
+        // touch controls. The live frame is created lazily on the first streamed token.
+        var onToken = new Progress<string>(delta =>
+        {
+            if (live is null)
+            {
+                StopThinking();
+                live = BeginMessage("assistant");
+                StartStreamTimer(live, sb);
+            }
+            sb.Append(delta);
+            _streamDirty = true;
+        });
+
         try
         {
-            ChatResult result = await provider.CompleteAsync(_conv.Messages);
+            ChatResult result = await provider.CompleteAsync(_conv.Messages, onToken, ct);
+            StopStreamTimer();
             StopThinking();
-            if (!result.Success)
+
+            if (live is null)
             {
+                // Provider didn't stream (agent mode, or it errored before any token).
                 AddMessage("assistant", result.Text);
-                _conv.RemoveLast();
             }
             else
             {
-                _conv.AddAssistant(result.Text);
-                AddMessage("assistant", result.Text);
+                // Final authoritative render: replaces the streamed text with the full result.
+                live.Inlines.Clear();
+                RenderText(live, result.Text);
+                ChatScroll.ScrollToEnd();
+            }
+
+            if (result.Success) _conv.AddAssistant(result.Text);
+            else _conv.RemoveLast();
+        }
+        catch (OperationCanceledException)
+        {
+            // Providers usually swallow cancellation and return partial text; this guards the
+            // agent path or any provider that lets it propagate. Keep whatever streamed so far.
+            StopStreamTimer();
+            StopThinking();
+            string partial = sb.ToString();
+            if (live is not null && partial.Length > 0)
+            {
+                live.Inlines.Clear();
+                RenderText(live, partial + "\n\n[stopped]");
+                ChatScroll.ScrollToEnd();
+                _conv.AddAssistant(partial);
+            }
+            else
+            {
+                _conv.RemoveLast();
             }
         }
         catch (Exception ex)
         {
+            StopStreamTimer();
             StopThinking();
             AddMessage("assistant", $"Error: {ex.Message}");
             _conv.RemoveLast();

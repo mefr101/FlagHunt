@@ -21,9 +21,12 @@ public sealed class AnthropicAgentProvider(
 {
     private const int ResultPreviewChars = 600;
 
+    /// <summary>Cap on tool calls dispatched concurrently within a single model turn.</summary>
+    private const int MaxParallelTools = 4;
+
     public string DisplayName => "claude (agent)";
 
-    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, IProgress<string>? onToken = null, CancellationToken ct = default)
     {
         string key = options.ApiKey.Trim();
         if (string.IsNullOrEmpty(key))
@@ -98,36 +101,50 @@ public sealed class AnthropicAgentProvider(
                 if ((string?)response["stop_reason"] != "tool_use")
                     break; // nothing more to call -- we're done.
 
-                var toolResults = new JsonArray();
-                foreach (var block in content)
+                // Collect the tool_use blocks in order so results line up with their ids.
+                var calls = content
+                    .Where(b => (string?)b!["type"] == "tool_use")
+                    .Select(b => (
+                        id: (string)b!["id"]!,
+                        name: (string)b["name"]!,
+                        input: b["input"]!.AsObject()))
+                    .ToList();
+
+                foreach (var c in calls)
+                    progress?.Report(AgentActivity.ToolCall($"{c.name}({Summarize(c.input)})"));
+
+                // Run the turn's tool calls concurrently (capped) -- most CTF tools are
+                // independent, so this collapses an N-tool turn from sum- to max-latency.
+                // The MCP server handles concurrent requests; the cap keeps a wide fan-out
+                // from thrashing the container's CPU/PID limits (see mcp/docker-compose.yml).
+                using var gate = new SemaphoreSlim(MaxParallelTools);
+                string[] outputs = await Task.WhenAll(calls.Select(async c =>
                 {
-                    if ((string?)block!["type"] != "tool_use")
-                        continue;
-
-                    string name = (string)block["name"]!;
-                    string id = (string)block["id"]!;
-                    var input = block["input"]!.AsObject();
-                    var args = input.ToDictionary(kv => kv.Key, kv => (object?)kv.Value?.DeepClone());
-
-                    progress?.Report(AgentActivity.ToolCall($"{name}({Summarize(input)})"));
-
-                    string output;
+                    await gate.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
-                        output = await toolbox.CallAsync(name, args, ct).ConfigureAwait(false);
+                        var args = c.input.ToDictionary(kv => kv.Key, kv => (object?)kv.Value?.DeepClone());
+                        return await toolbox.CallAsync(c.name, args, ct).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        output = $"tool error: {ex.Message}";
+                        return $"tool error: {ex.Message}";
                     }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                })).ConfigureAwait(false);
 
-                    progress?.Report(AgentActivity.ToolResult(Preview(output)));
-
+                var toolResults = new JsonArray();
+                for (int i = 0; i < calls.Count; i++)
+                {
+                    progress?.Report(AgentActivity.ToolResult(Preview(outputs[i])));
                     toolResults.Add(new JsonObject
                     {
                         ["type"] = "tool_result",
-                        ["tool_use_id"] = id,
-                        ["content"] = output,
+                        ["tool_use_id"] = calls[i].id,
+                        ["content"] = outputs[i],
                     });
                 }
 
@@ -143,12 +160,28 @@ public sealed class AnthropicAgentProvider(
     /// <summary>One round-trip to the Anthropic Messages API with the toolbox tools attached.</summary>
     private async Task<JsonObject> SendAsync(string system, JsonArray messages, JsonArray tools, string key, CancellationToken ct)
     {
+        // Prompt caching (GA -- no beta header). Render order is tools -> system -> messages,
+        // so a cache_control breakpoint on the last system block caches the whole static
+        // tools+system prefix; a second breakpoint on the last message caches the growing
+        // conversation. Both are ephemeral (5-min TTL). The static prefix (system + the ~21
+        // tool schemas) is resent every iteration, so this is the loop's biggest cost saving.
+        var msgs = messages.DeepClone()!.AsArray();
+        MarkConversationCacheBreakpoint(msgs);
+
         var body = new JsonObject
         {
             ["model"] = options.Model,
             ["max_tokens"] = options.MaxTokens,
-            ["system"] = system,
-            ["messages"] = messages.DeepClone(),
+            ["system"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = system,
+                    ["cache_control"] = new JsonObject { ["type"] = "ephemeral" },
+                }
+            },
+            ["messages"] = msgs,
             ["tools"] = tools.DeepClone(),
         };
 
@@ -165,6 +198,31 @@ public sealed class AnthropicAgentProvider(
             throw new HttpRequestException($"Anthropic API {(int)resp.StatusCode}: {ExtractErrorJson(json)}");
 
         return (JsonObject)JsonNode.Parse(json)!;
+    }
+
+    /// <summary>Attaches an ephemeral cache breakpoint to the last content block of the last
+    /// message so the conversation prefix is cached across agent-loop iterations. Operates on a
+    /// clone -- the persistent history stays unmarked so successive clones hash deterministically
+    /// and breakpoints never accumulate past the 4-per-request cap.</summary>
+    private static void MarkConversationCacheBreakpoint(JsonArray messages)
+    {
+        if (messages.Count == 0) return;
+        var last = messages[^1]!.AsObject();
+
+        JsonArray blocks;
+        if (last["content"] is JsonArray arr)
+        {
+            blocks = arr;
+        }
+        else
+        {
+            // Plain-string content -> wrap as a single text block so cache_control has a home.
+            blocks = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = (string?)last["content"] ?? "" } };
+            last["content"] = blocks;
+        }
+
+        if (blocks.Count == 0) return;
+        blocks[^1]!.AsObject()["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
     }
 
     private static string Summarize(JsonObject input)

@@ -11,7 +11,7 @@ public sealed class CursorProvider(HttpClient http, CursorOptions options) : ICh
 {
     public string DisplayName => string.IsNullOrWhiteSpace(options.Model) ? "cursor-small" : options.Model;
 
-    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+    public async Task<ChatResult> CompleteAsync(IReadOnlyList<ChatMessage> history, IProgress<string>? onToken = null, CancellationToken ct = default)
     {
         string key = options.ApiKey.Trim();
         if (string.IsNullOrEmpty(key))
@@ -30,7 +30,8 @@ public sealed class CursorProvider(HttpClient http, CursorOptions options) : ICh
             ["model"] = model,
             ["messages"] = msgArr,
             ["max_tokens"] = options.MaxTokens,
-            ["temperature"] = options.Temperature
+            ["temperature"] = options.Temperature,
+            ["stream"] = true,
         };
 
         using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.cursor.sh/v1/chat/completions")
@@ -39,24 +40,43 @@ public sealed class CursorProvider(HttpClient http, CursorOptions options) : ICh
         };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
 
+        // Accumulate outside the try so a mid-stream fault (or a user Stop) keeps the partial text.
+        var sb = new StringBuilder();
         try
         {
-            var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
-            string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
+            var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return ChatResult.Error($"Cursor Error {(int)resp.StatusCode}: {ExtractError(json)}");
+            {
+                string err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return ChatResult.Error($"Cursor Error {(int)resp.StatusCode}: {ExtractError(err)}");
+            }
 
-            string text = JsonDocument.Parse(json).RootElement
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString() ?? "";
-            return ChatResult.Ok(text);
+            await foreach (string data in SseReader.ReadDataLinesAsync(resp, ct).ConfigureAwait(false))
+            {
+                if (data == "[DONE]") break;
+
+                string? delta;
+                try { delta = JsonNode.Parse(data)?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>(); }
+                catch { continue; } // ignore keep-alives / malformed frames
+
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    sb.Append(delta);
+                    onToken?.Report(delta);
+                }
+            }
+
+            return sb.Length > 0
+                ? ChatResult.Ok(sb.ToString())
+                : ChatResult.Error("Cursor returned an empty stream.");
         }
         catch (Exception ex)
         {
-            return ChatResult.Error($"Cursor request failed: {ex.Message}");
+            if (sb.Length > 0)
+                return ChatResult.Ok(sb + "\n\n" + (ct.IsCancellationRequested ? "[stopped]" : $"[stream interrupted: {ex.Message}]"));
+            return ct.IsCancellationRequested
+                ? ChatResult.Ok("[stopped]")
+                : ChatResult.Error($"Cursor request failed: {ex.Message}");
         }
     }
 
