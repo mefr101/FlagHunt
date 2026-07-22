@@ -141,6 +141,11 @@ The answer **streams in live** as the model generates it (all four providers). W
 a response is running, **SOLVE CHALLENGE** turns into **STOP** — click it to cancel;
 whatever streamed so far is kept.
 
+There is **no fixed request timeout**: prompt processing (prefill) on a large prompt
+or a slow local model can legitimately take minutes, so a run is bounded only by
+**STOP** and a generous 20-minute safety cap (a timeout is handled just like a stop —
+the partial answer is kept).
+
 **Header buttons:**
 
 - **clear ws** — deletes challenge files staged in the MCP toolbox workspace
@@ -152,8 +157,17 @@ whatever streamed so far is kept.
 
 ### File attachments
 
-- Text / code files (`.py`, `.js`, `.c`, `.php`, …) are inlined as-is (up to ~60 KB each).
-- Other files (binaries, pcaps, images, unknown formats) are base64-encoded and sent (truncated for size).
+How attachments enter the prompt depends on the mode — the goal is to keep the prompt
+small so prefill stays fast:
+
+- **Agent mode:** files are staged into the toolbox workspace, so the prompt carries
+  only a **filename + size manifest** — the model reads them with `list_workspace`,
+  `strings_extract`, `file_type`, etc. rather than receiving their bytes.
+- **Chat mode:**
+  - Text / code files (`.py`, `.js`, `.c`, `.php`, …) are inlined as-is (up to ~40 KB each).
+  - Small binaries (≤ 8 KB) are base64-encoded and sent in full.
+  - Larger binaries are reduced to a **magic-byte type guess + a short hex/ascii head**
+    instead of a full base64 dump (attach them in Agent mode for full tool-based analysis).
 
 ---
 

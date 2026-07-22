@@ -50,7 +50,10 @@
       "PowerShell(\"----runtimes----\")",
       "PowerShell(dotnet build \"C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt\\\\FlagHunt.slnx\" -c Debug --nologo 2>&1)",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- exit: $LASTEXITCODE ---\"; git log --oneline -3)",
+      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git push origin main; \"--- exit: $LASTEXITCODE ---\")",
+      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git add -A; git status --short; \"--- committing ---\"; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- exit: $LASTEXITCODE ---\"; git log --oneline -1)"
     ]
   }
 }

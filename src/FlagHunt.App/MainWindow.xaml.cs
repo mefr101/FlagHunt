@@ -28,7 +28,14 @@ public partial class MainWindow : Window
     // ── Backend state ──────────────────────────────────────────────────────
     private readonly Conversation _conv = new();
     private readonly List<Attachment> _files = [];
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(300) };
+
+    // Prefill on a large prompt or a slow local model can take minutes; a fixed HTTP timeout
+    // capped time-to-first-token and killed legitimate long runs. Let requests run unbounded
+    // and govern them with the Stop button (CancellationToken), plus a generous safety cap so
+    // a truly hung request still ends on its own. The cap cancels the same token the Stop
+    // button uses, so a timeout is handled exactly like a manual stop.
+    private static readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(20);
 
     // ── UI state ───────────────────────────────────────────────────────────
     private string _provider = "anthropic";
@@ -760,6 +767,7 @@ public partial class MainWindow : Window
     {
         _loading = true;
         _cts = new CancellationTokenSource();
+        _cts.CancelAfter(RequestTimeout);   // safety cap; a manual Stop cancels the same token
         BtnSolve.Content = "  STOP";
         BtnSolve.IsEnabled = true;   // stays clickable so a click cancels the run
         BtnSend.IsEnabled = false;
@@ -808,7 +816,8 @@ public partial class MainWindow : Window
         string content = ContentBuilder.Build(
             _cat,
             string.IsNullOrEmpty(ch) ? "Analyze the attached files and solve this CTF challenge." : ch,
-            _files);
+            _files,
+            agentMode: agentActive);
         _conv.AddUser(content);
         AddThinking();
 
