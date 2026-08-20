@@ -68,18 +68,38 @@ Overridable env vars: `CTF_MCP_URL` (default `http://localhost:8000/mcp`),
 
 ## Tools exposed
 
-| Category   | Tools |
-|------------|-------|
-| Encoding / crypto | `base64_decode`, `base64_encode`, `hex_decode`, `rot13`, `caesar_bruteforce`, `xor_hex`, `url_decode`, `identify_hash`, `hash_text` |
-| Forensics  | `list_workspace`, `file_type`, `strings_extract`, `binwalk_scan`, `exif_metadata`, `steghide_extract` |
-| Steganography | `zsteg_scan` (image LSB detection, PNG/BMP), `wav_lsb_extract` (audio LSB extraction) |
-| Reversing / pwn | `disassemble`, `checksec`, `cyclic_pattern`, `cyclic_find` |
-| Networking (pcap) | `pcap_overview` (triage: protocol hierarchy + conversations), `pcap_follow_stream` (reassemble one TCP/UDP stream) |
-| Web        | `jwt_decode`, `http_fetch` |
+The server exposes ~130 tools grouped into domain toolboxes. Tool names are
+prefixed by toolbox so the client can filter them (see *Category filtering* below).
 
-These are deliberately benign analysis primitives — decoders, file inspection,
-disassembly, offset-finding. There is no exploit code; the model composes these
-building blocks itself.
+| Toolbox | Prefix | Examples |
+|---------|--------|----------|
+| Core encoding / crypto | *(none)* | `base64_decode`, `hex_decode`, `rot13`, `caesar_bruteforce`, `xor_hex`, `identify_hash`, `hash_text` |
+| Core forensics / stego | *(none)* | `list_workspace`, `file_type`, `strings_extract`, `binwalk_scan`, `exif_metadata`, `steghide_extract`, `zsteg_scan`, `wav_lsb_extract` |
+| Core reversing / pwn | *(none)* | `disassemble`, `checksec`, `cyclic_pattern`, `cyclic_find` |
+| Core web / net | *(none)* | `jwt_decode`, `http_fetch`, `pcap_overview`, `pcap_follow_stream` |
+| Pwn | `pwn_` | `pwn_elf_info`, `pwn_find_gadgets`, `pwn_rop_chain`, `pwn_shellcode`, `pwn_format_string` |
+| Web exploitation | `web_` | `web_sqli_test`, `web_jwt_attacks`, `web_ssti_detect`, `web_lfi_test`, `web_ssrf_payloads` |
+| Reverse engineering | `re_` | `re_disassemble_function`, `re_decompile_hint`, `re_angr_solve`, `re_z3_constraint_solve` |
+| Networking | `net_` | `net_port_scan`, `net_banner_grab`, `net_dns_lookup`, `net_pcap_extract_creds`, `net_ssl_info` |
+| OSINT | `osint_` | `osint_username_search`, `osint_domain_recon`, `osint_ip_investigate`, `osint_wayback_urls` |
+| Forensics | `forens_` | `forens_carve_files`, `forens_image_lsb`, `forens_audio_spectrogram`, `forens_yara_hunt`, `forens_timeline` |
+| Red team (offensive) | `red_` | `red_sql_payloads`, `red_xss_payloads`, `red_ssti_payloads`, `red_jwt_forge`, `red_reverse_shell` |
+| Blue team (defensive) | `blue_` | `blue_ioc_extract`, `blue_yara_scan`, `blue_detect_webshell`, `blue_log_hunt` |
+
+Most tools are analysis primitives (decoders, file inspection, disassembly), but
+this set is **broader than the original benign-only toolbox** — the `red_` tools
+generate offensive payloads/wordlists, and the `net_` / `osint_` tools perform
+**active network scanning and live external recon** (see *Authorisation*).
+
+### Category filtering (client side)
+
+Handing all ~130 tool schemas to the model on every request bloats prefill and
+degrades local models. The FlagHunt app filters the discovered tools by the CTF
+**category** selected in the sidebar (`McpToolbox.ToolsForCategory`): a universal
+core (triage + decoders) plus the tools whose prefix matches the category, so the
+model typically sees 15–40 tools rather than all 130. `Auto`/`Misc` get a broad
+cross-domain triage set. This is purely a client-side view — the server still
+exposes every tool.
 
 ## Security model
 
@@ -101,11 +121,25 @@ and tear it down afterward rather than reusing one long-lived container.
 
 ## Authorisation
 
-Point this only at CTF infrastructure you are authorised to use — your own
-challenges, a CTF platform's scoped targets, or intentionally vulnerable
-practice machines. The `http_fetch` tool in particular reaches the network; keep
-it aimed at in-scope hosts. The sandboxing above protects your host *and* keeps
-the tooling from being accidentally aimed at systems outside the competition.
+**Only point this at CTF infrastructure you are explicitly authorised to test** —
+your own challenges, a CTF platform's scoped targets, or intentionally vulnerable
+practice machines. This matters more than it did for the original benign toolbox,
+because several tools now reach or attack external systems:
+
+- **Active network tools** (`net_port_scan`, `net_banner_grab`, `net_traceroute`,
+  `http_fetch`) connect to whatever host you point them at — scanning hosts you
+  don't own is likely illegal.
+- **OSINT tools** (`osint_domain_recon`, `osint_username_search`, `osint_ip_investigate`,
+  …) make live requests to third-party sites and services.
+- **Red-team tools** (`red_*`) generate offensive payloads/wordlists for use only
+  against authorised targets.
+
+Because these need outbound access, the container is **not** run with
+`internal: true` by default. For challenge sets that are purely offline
+(crypto/forensics/rev/stego files), uncomment `internal: true` in
+`docker-compose.yml` to cut egress entirely — the strongest containment. The
+sandboxing above protects your *host*; it does not stop a tool from reaching an
+out-of-scope target on the network, so that restraint is on you.
 
 ## Extending it
 

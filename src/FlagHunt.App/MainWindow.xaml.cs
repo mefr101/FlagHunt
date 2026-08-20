@@ -746,7 +746,7 @@ public partial class MainWindow : Window
                 if (!_lmStudioAgentMode)
                     return new LmStudioProvider(_http, lmOpts);
 
-                lmOpts = lmOpts with { UseTools = true, McpUrl = TbLmStudioMcpUrl.Text.Trim() };
+                lmOpts = lmOpts with { UseTools = true, McpUrl = TbLmStudioMcpUrl.Text.Trim(), Category = _cat };
                 // Progress is captured on the UI thread, so handlers run there too.
                 var lmProgress = new Progress<AgentActivity>(OnAgentActivity);
                 return new LmStudioAgentProvider(_http, lmOpts, lmProgress);
@@ -755,7 +755,7 @@ public partial class MainWindow : Window
                 if (!_agentMode)
                     return new AnthropicProvider(_http, anthOpts);
 
-                anthOpts = anthOpts with { UseTools = true, McpUrl = TbMcpUrl.Text.Trim() };
+                anthOpts = anthOpts with { UseTools = true, McpUrl = TbMcpUrl.Text.Trim(), Category = _cat };
                 // Progress is captured on the UI thread, so handlers run there too.
                 var progress = new Progress<AgentActivity>(OnAgentActivity);
                 return new AnthropicAgentProvider(_http, anthOpts, progress);

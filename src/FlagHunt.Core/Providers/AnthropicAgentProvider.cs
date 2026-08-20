@@ -48,9 +48,11 @@ public sealed class AnthropicAgentProvider(
 
         await using (toolbox)
         {
-            var tools = toolbox.ToAnthropicTools();
+            var selected = toolbox.ToolsForCategory(options.Category);
+            var tools = toolbox.ToAnthropicTools(selected);
             progress?.Report(AgentActivity.Info(
-                $"{toolbox.Tools.Count} tools ready: {string.Join(", ", toolbox.Tools.Select(t => t.Name))}"));
+                $"{selected.Count}/{toolbox.Tools.Count} tools for '{options.Category}': " +
+                string.Join(", ", selected.Select(t => t.Name))));
 
             var messages = new JsonArray();
             foreach (var m in history)

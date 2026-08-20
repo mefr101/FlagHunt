@@ -53,7 +53,21 @@
       "Skill(claude-api:*)",
       "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- exit: $LASTEXITCODE ---\"; git log --oneline -3)",
       "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git push origin main; \"--- exit: $LASTEXITCODE ---\")",
-      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git add -A; git status --short; \"--- committing ---\"; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- exit: $LASTEXITCODE ---\"; git log --oneline -1)"
+      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git add -A; git status --short; \"--- committing ---\"; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- exit: $LASTEXITCODE ---\"; git log --oneline -1)",
+      "Bash(cd /tmp/mcp_import/mcp/server && echo \"=== line count ===\" && wc -l server.py && echo \"\" && echo \"=== tool count ===\" && grep -c \"@mcp.tool\\(\\)\" server.py && echo \"\" && echo \"=== section header comments \\(====\\) ===\" && grep -n \"^# ===\\\\|^# ---\\\\|CATEGORY\\\\|Category\\\\|toolbox\\\\|TOOLBOX\" server.py | head -60)",
+      "Bash(awk 'BEGIN{RS=\"\\\\n\"} {print}')",
+      "Bash(grep -nA1 \"@mcp.tool\\(\\)\" server.py)",
+      "Bash(awk '/@mcp.tool/{ln=$1} /def /{sub\\(/.*def /,\"\"\\);sub\\(/\\\\\\(.*/,\"\"\\);print ln\" \"$0}')",
+      "Bash(awk -F- '{print $1}')",
+      "Bash(awk ' *)",
+      "Bash(python3 -m py_compile server.py)",
+      "Bash(cp /tmp/mcp_import/mcp/server/server.py /c/Users/Kobio/projects/flaghunt/mcp/server/server.py)",
+      "Bash(cp /tmp/mcp_import/mcp/server/Dockerfile /c/Users/Kobio/projects/flaghunt/mcp/server/Dockerfile)",
+      "Bash(cp /tmp/mcp_import/mcp/server/requirements.txt /c/Users/Kobio/projects/flaghunt/mcp/server/requirements.txt)",
+      "Bash(cp /tmp/mcp_import/mcp/README.md /c/Users/Kobio/projects/flaghunt/mcp/README.md)",
+      "Bash(sed -n '/## Tools exposed/,/## Security model/p' mcp/README.md)",
+      "Bash(sed -n '/## Authorisation/,/## Extending/p' mcp/README.md)",
+      "PowerShell(cd C:\\\\Users\\\\Kobio\\\\projects\\\\flaghunt; git add -A; git commit -F \"C:\\\\Users\\\\Kobio\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Kobio-projects-flaghunt\\\\e378dbf8-2cae-4e06-97fd-53b011f51ff1\\\\scratchpad\\\\commitmsg.txt\"; \"--- commit exit: $LASTEXITCODE ---\"; git push origin main; \"--- push exit: $LASTEXITCODE ---\"; git log --oneline -1)"
     ]
   }
 }

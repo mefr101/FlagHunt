@@ -175,20 +175,31 @@ small so prefill stays fast:
 
 Single-shot chat tells you *how* to solve a challenge. **Agent mode** lets the
 model *do* it: a sandboxed [MCP](https://modelcontextprotocol.io) server exposes
-benign CTF analysis tools (encoding/crypto decoders, `file`/`strings`/`binwalk`/`exiftool`/
-`steghide`, image & audio LSB stego via `zsteg`/`wav_lsb_extract`, pcap triage and
-stream reassembly via `tshark`, `objdump`/`checksec`/pwntools, `jwt_decode`/`http_fetch`),
-and FlagHunt
-runs a tool-use loop — call the model, run whatever tools it asks for, feed the
-results back, repeat — until the flag drops out. Tool calls stream live into the
-conversation as they run, and independent tools requested in the same turn run
-**in parallel**. On the Anthropic path, the system prompt and tool schemas are
-**prompt-cached**, so each loop iteration reprocesses only the new turn.
+**~130 tools across domain toolboxes** — crypto/encoding, forensics & stego, pwn
+(`pwn_*`), web exploitation (`web_*`), reverse engineering (`re_*`), networking
+(`net_*`), OSINT (`osint_*`), red team (`red_*`), blue team (`blue_*`) — and
+FlagHunt runs a tool-use loop — call the model, run whatever tools it asks for,
+feed the results back, repeat — until the flag drops out. Tool calls stream live
+into the conversation as they run, and independent tools requested in the same
+turn run **in parallel**. On the Anthropic path, the system prompt and tool
+schemas are **prompt-cached**, so each loop iteration reprocesses only the new turn.
+
+**Tools are filtered by the selected category.** Rather than hand the model all
+~130 schemas (which bloats prefill and hurts local models), the app sends only the
+tools relevant to the sidebar **category** — a universal core plus that category's
+toolbox — so the model typically sees 15–40 tools. `Auto`/`Misc` get a broad
+triage set. Pick a specific category to unlock its full toolbox.
 
 Agent mode works with both **Anthropic** (Claude, cloud) and **LM Studio** (a
 local model, fully offline). Both drive the *same* toolbox; only the tool-call
-wire format differs (Anthropic `tool_use` vs OpenAI `tool_calls`). The toolbox
-ships no exploit code, only analysis primitives; the model composes them.
+wire format differs (Anthropic `tool_use` vs OpenAI `tool_calls`).
+
+> ⚠️ **Authorisation:** the toolbox now includes tools that reach or attack
+> external systems — active port scanning / recon (`net_*`), live OSINT lookups
+> (`osint_*`), and offensive payload generators (`red_*`). Use them **only against
+> CTF targets you are authorised to test.** For fully offline challenge sets, set
+> `internal: true` in `mcp/docker-compose.yml` to cut the container's network
+> egress. See [mcp/README.md](mcp/README.md) → Authorisation.
 
 ### 1. Start the toolbox
 

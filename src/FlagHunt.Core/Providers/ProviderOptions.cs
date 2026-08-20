@@ -13,6 +13,9 @@ public sealed record AnthropicOptions(string ApiKey)
 
     /// <summary>Safety cap on agent loop iterations (model turns that request tools).</summary>
     public int MaxToolIterations { get; init; } = 25;
+
+    /// <summary>Selected CTF category; filters which toolbox tools are offered to the model.</summary>
+    public string Category { get; init; } = "auto";
 }
 
 public sealed record OllamaOptions(string Host, string Model)
@@ -40,4 +43,7 @@ public sealed record LmStudioOptions(string Host, string Model)
 
     /// <summary>Safety cap on agent loop iterations (model turns that request tools).</summary>
     public int MaxToolIterations { get; init; } = 25;
+
+    /// <summary>Selected CTF category; filters which toolbox tools are offered to the model.</summary>
+    public string Category { get; init; } = "auto";
 }

@@ -13,6 +13,13 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" | debc
         steghide \
         tshark \
         ruby \
+        john \
+        yara \
+        gdb \
+        gcc \
+        nasm \
+        python3-dev \
+        build-essential \
     && gem install --no-document zsteg \
     && rm -rf /var/lib/apt/lists/*
 
