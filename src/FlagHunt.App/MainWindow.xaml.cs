@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private bool _agentMode;
     private bool _lmStudioAgentMode;
     private StackPanel? _agentLog;
+    private readonly SessionEventLog _log = new();
     private readonly Dictionary<string, Button> _catBtns = [];
 
     private bool _chPh = true;
@@ -582,6 +583,7 @@ public partial class MainWindow : Window
     /// <summary>Renders one agent event into a live "AGENT" card, creating it on first use.</summary>
     private void OnAgentActivity(AgentActivity a)
     {
+        _log.LogActivity(a);
         if (_agentLog is null)
         {
             RemoveWelcome();
@@ -660,6 +662,7 @@ public partial class MainWindow : Window
         _conv.Clear();
         _files.Clear();
         FilesList.Children.Clear();
+        _log.Clear();
         ShowWelcome();
         SetStatus("cleared  ready", "#5A6A85");
     }
@@ -732,6 +735,46 @@ public partial class MainWindow : Window
         if (sb.Length > 0) { Clipboard.SetText(sb.ToString()); SetStatus("copied to clipboard", "#00E5B0"); }
     }
 
+    /// <summary>Writes the timestamped session event log (agent decisions, tool results, and
+    /// outcomes) to a user-chosen .txt file.</summary>
+    private void BtnSaveLog_Click(object sender, RoutedEventArgs e)
+    {
+        if (_log.Count == 0)
+        {
+            SetStatus("nothing to log yet", "#5A6A85");
+            return;
+        }
+
+        var dlg = new SaveFileDialog
+        {
+            Title = "Save session log",
+            FileName = $"flaghunt-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt",
+            Filter = "Text file (*.txt)|*.txt|All files (*.*)|*.*",
+            DefaultExt = ".txt",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var header = new[]
+        {
+            new KeyValuePair<string, string>("Provider", _provider),
+            new KeyValuePair<string, string>("Category", _cat),
+            new KeyValuePair<string, string>("Agent mode",
+                ((_provider == "anthropic" && _agentMode) || (_provider == "lmstudio" && _lmStudioAgentMode)) ? "on" : "off"),
+        };
+
+        try
+        {
+            File.WriteAllText(dlg.FileName, _log.Render(header));
+            SetStatus($"log saved  {Path.GetFileName(dlg.FileName)}", "#00E5B0");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not save the log:\n\n{ex.Message}", "Save log",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            SetStatus("log save failed", "#FF6B6B");
+        }
+    }
+
     // ── Provider construction (frontend config -> backend provider) ─────────
     private IChatProvider BuildProvider()
     {
@@ -802,6 +845,12 @@ public partial class MainWindow : Window
         string display = string.IsNullOrEmpty(ch) ? $"[Analyzing {_files.Count} attached file(s)]" : ch;
         AddMessage("user", display);
 
+        bool agentModeOn = (_provider == "anthropic" && _agentMode)
+                          || (_provider == "lmstudio" && _lmStudioAgentMode);
+        _log.Log(LogCategory.Session,
+            $"Challenge submitted (provider={_provider}, category={_cat}, agent mode={(agentModeOn ? "on" : "off")}, " +
+            $"attachments={_files.Count}): {display}");
+
         // In agent mode, stage attachments into the toolbox workspace so the file
         // tools (list_workspace, file_type, strings_extract, ...) can read them.
         _agentLog = null;
@@ -843,6 +892,7 @@ public partial class MainWindow : Window
 
         AddMessage("user", text);
         _conv.AddUser(text);
+        _log.Log(LogCategory.Session, $"Follow-up: {text}");
         _agentLog = null;
         AddThinking();
 
@@ -881,6 +931,8 @@ public partial class MainWindow : Window
             StopStreamTimer();
             StopThinking();
 
+            _log.Log(LogCategory.Result, result.Success ? $"Final answer:\n{result.Text}" : $"Error: {result.Text}");
+
             if (live is null)
             {
                 // Provider didn't stream (agent mode, or it errored before any token).
@@ -904,6 +956,9 @@ public partial class MainWindow : Window
             StopStreamTimer();
             StopThinking();
             string partial = sb.ToString();
+            _log.Log(LogCategory.Result, partial.Length > 0
+                ? $"Stopped by user. Partial answer kept:\n{partial}"
+                : "Stopped by user before any answer streamed.");
             if (live is not null && partial.Length > 0)
             {
                 live.Inlines.Clear();
@@ -920,6 +975,7 @@ public partial class MainWindow : Window
         {
             StopStreamTimer();
             StopThinking();
+            _log.Log(LogCategory.Result, $"Error: {ex.Message}");
             AddMessage("assistant", $"Error: {ex.Message}");
             _conv.RemoveLast();
         }

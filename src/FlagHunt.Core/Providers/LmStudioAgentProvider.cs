@@ -82,6 +82,8 @@ public sealed class LmStudioAgentProvider(
                     break;
                 }
 
+                progress?.Report(AgentActivity.Info($"-- iteration {iteration + 1} --"));
+
                 JsonObject response;
                 try
                 {
@@ -113,13 +115,25 @@ public sealed class LmStudioAgentProvider(
                 // Record the assistant turn verbatim so tool_call ids line up next turn.
                 messages.Add(message.DeepClone());
 
+                var usage = response["usage"]?.AsObject();
+                if (usage is not null)
+                    progress?.Report(AgentActivity.Info(
+                        $"usage: prompt={usage["prompt_tokens"]}, completion={usage["completion_tokens"]} tokens"));
+
                 var toolCalls = message["tool_calls"]?.AsArray();
                 bool wantsTools = (string?)choice["finish_reason"] == "tool_calls"
                                   || (toolCalls is { Count: > 0 });
                 if (!wantsTools || toolCalls is null || toolCalls.Count == 0)
+                {
+                    progress?.Report(AgentActivity.Info($"finish reason: {(string?)choice["finish_reason"] ?? "stop"}"));
                     break; // nothing more to call -- we're done.
+                }
 
                 sawAnyToolCall = true;
+
+                // The model's rationale for the tools it is about to call this turn.
+                if (!string.IsNullOrWhiteSpace(text))
+                    progress?.Report(AgentActivity.Info($"reasoning: {text}"));
 
                 // Pre-parse every tool call before dispatching. OpenAI delivers arguments as a
                 // JSON *string*; local models sometimes emit malformed or empty JSON, so parse

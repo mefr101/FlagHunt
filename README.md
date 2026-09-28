@@ -154,6 +154,11 @@ the partial answer is kept).
   the current attachments or the conversation.
 - **clear** — starts a fresh session (clears the conversation and attachments).
 - **copy all** — copies the full conversation to the clipboard.
+- **save log** — exports a timestamped **session event log** to a `.txt` file: every
+  agent decision and result (iteration boundaries, the model's reasoning, each tool call
+  with its arguments, tool outputs, token usage, stop reason) plus session milestones
+  (challenge submitted, follow-ups, final answer, errors, stops). Records agent-mode runs
+  in full; chat-mode runs still log the prompts and outcomes. Cleared by **clear**.
 
 ### File attachments
 

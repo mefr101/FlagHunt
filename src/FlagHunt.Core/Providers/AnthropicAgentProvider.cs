@@ -71,6 +71,8 @@ public sealed class AnthropicAgentProvider(
                     break;
                 }
 
+                progress?.Report(AgentActivity.Info($"-- iteration {iteration + 1} --"));
+
                 JsonObject response;
                 try
                 {
@@ -87,6 +89,7 @@ public sealed class AnthropicAgentProvider(
                 if (content is null)
                     return ChatResult.Error($"API Error: {ExtractError(response)}");
 
+                var turnText = new StringBuilder();
                 foreach (var block in content)
                 {
                     if ((string?)block!["type"] == "text")
@@ -94,14 +97,29 @@ public sealed class AnthropicAgentProvider(
                         string text = (string?)block["text"] ?? "";
                         if (finalText.Length > 0) finalText.Append("\n\n");
                         finalText.Append(text);
+                        if (turnText.Length > 0) turnText.Append("\n\n");
+                        turnText.Append(text);
                     }
                 }
 
                 // Record the assistant turn verbatim so tool_use ids line up next turn.
                 messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = content.DeepClone() });
 
-                if ((string?)response["stop_reason"] != "tool_use")
+                var usage = response["usage"]?.AsObject();
+                if (usage is not null)
+                    progress?.Report(AgentActivity.Info(
+                        $"usage: in={usage["input_tokens"]}, out={usage["output_tokens"]} tokens"));
+
+                string? stopReason = (string?)response["stop_reason"];
+                if (stopReason != "tool_use")
+                {
+                    progress?.Report(AgentActivity.Info($"stop reason: {stopReason ?? "end"}"));
                     break; // nothing more to call -- we're done.
+                }
+
+                // The model's rationale for the tools it is about to call this turn.
+                if (turnText.Length > 0)
+                    progress?.Report(AgentActivity.Info($"reasoning: {turnText}"));
 
                 // Collect the tool_use blocks in order so results line up with their ids.
                 var calls = content

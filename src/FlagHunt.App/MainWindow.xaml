@@ -484,6 +484,8 @@
                                     ToolTip="Delete challenge files staged in the MCP toolbox workspace (mcp/challenges)"/>
                             <Button Content="clear"   Style="{StaticResource SmallBtn}" Click="BtnClear_Click"/>
                             <Button Content="copy all" Style="{StaticResource SmallBtn}" Click="BtnCopy_Click"/>
+                            <Button Content="save log" Style="{StaticResource SmallBtn}" Click="BtnSaveLog_Click"
+                                    ToolTip="Export the timestamped session event log (agent decisions and results) to a .txt file"/>
                         </StackPanel>
                     </DockPanel>
                 </Border>
