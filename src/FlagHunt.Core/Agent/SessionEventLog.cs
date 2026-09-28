@@ -13,8 +13,15 @@ public enum LogCategory
     Result,
 }
 
-/// <summary>One timestamped line in the <see cref="SessionEventLog"/>.</summary>
-public sealed record LogEntry(DateTimeOffset Time, LogCategory Category, AgentActivityKind Kind, string Text);
+/// <summary>One timestamped line in the <see cref="SessionEventLog"/>. <see cref="Signal"/>,
+/// <see cref="Value"/> and <see cref="Number"/> carry structured facts for the postmortem
+/// (see <see cref="LogSignal"/> for what each signal stores).</summary>
+public sealed record LogEntry(DateTimeOffset Time, LogCategory Category, AgentActivityKind Kind, string Text)
+{
+    public LogSignal Signal { get; init; }
+    public string? Value { get; init; }
+    public long Number { get; init; }
+}
 
 /// <summary>
 /// Records a timestamped trail of agent decisions and results across a session so it can be
@@ -33,13 +40,24 @@ public sealed class SessionEventLog
     public int Count { get { lock (_gate) return _entries.Count; } }
 
     /// <summary>Appends one entry, stamped with the current time.</summary>
-    public void Log(LogCategory category, string text, AgentActivityKind kind = AgentActivityKind.Info)
+    public void Log(LogCategory category, string text, AgentActivityKind kind = AgentActivityKind.Info,
+                    LogSignal signal = LogSignal.None, string? value = null, long number = 0)
     {
-        lock (_gate) _entries.Add(new LogEntry(DateTimeOffset.Now, category, kind, text ?? ""));
+        var entry = new LogEntry(DateTimeOffset.Now, category, kind, text ?? "")
+        {
+            Signal = signal, Value = value, Number = number,
+        };
+        lock (_gate) _entries.Add(entry);
     }
 
     /// <summary>Records a live agent event under the <see cref="LogCategory.Agent"/> phase.</summary>
-    public void LogActivity(AgentActivity a) => Log(LogCategory.Agent, a.Text, a.Kind);
+    public void LogActivity(AgentActivity a) => Log(LogCategory.Agent, a.Text, a.Kind, a.Signal, a.Value, a.Number);
+
+    /// <summary>A point-in-time copy of the recorded entries.</summary>
+    public IReadOnlyList<LogEntry> Snapshot()
+    {
+        lock (_gate) return _entries.ToArray();
+    }
 
     /// <summary>Drops all entries and restarts the session clock (used when the session is cleared).</summary>
     public void Clear()
@@ -53,8 +71,9 @@ public sealed class SessionEventLog
 
     /// <summary>
     /// Renders the whole trail as a plain-text report: a header block (optionally with the
-    /// supplied provider/category/mode fields) followed by one aligned, timestamped line per
-    /// event. Multi-line event text (e.g. a tool result) is indented under its first line.
+    /// supplied provider/category/mode fields), one aligned, timestamped line per event, and a
+    /// closing <see cref="PostmortemAnalyzer"/> verdict for each run. Multi-line event text
+    /// (e.g. a tool result) is indented under its first line.
     /// </summary>
     public string Render(IReadOnlyList<KeyValuePair<string, string>>? header = null)
     {
@@ -102,6 +121,8 @@ public sealed class SessionEventLog
                 sb.AppendLine(pad + lines[i]);
         }
 
+        sb.AppendLine();
+        PostmortemAnalyzer.Render(PostmortemAnalyzer.Analyze(snapshot), sb);
         return sb.ToString();
     }
 }

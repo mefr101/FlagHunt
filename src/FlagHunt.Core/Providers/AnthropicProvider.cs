@@ -44,7 +44,7 @@ public sealed class AnthropicProvider(HttpClient http, AnthropicOptions options)
                 new JsonObject
                 {
                     ["type"] = "text",
-                    ["text"] = CtfKnowledge.SystemPrompt,
+                    ["text"] = options.SystemPrompt ?? CtfKnowledge.SystemPrompt,
                     ["cache_control"] = new JsonObject { ["type"] = "ephemeral" },
                 }
             },

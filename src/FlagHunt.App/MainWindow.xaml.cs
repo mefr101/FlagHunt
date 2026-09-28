@@ -36,12 +36,14 @@ public partial class MainWindow : Window
     // button uses, so a timeout is handled exactly like a manual stop.
     private static readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan ReviewTimeout = TimeSpan.FromMinutes(5);
 
     // ── UI state ───────────────────────────────────────────────────────────
     private string _provider = "anthropic";
     private string _cat = "auto";
     private bool _loading;
     private CancellationTokenSource? _cts;
+    private bool _userStopped;   // distinguishes a Stop click from the RequestTimeout cap
     private bool _agentMode;
     private bool _lmStudioAgentMode;
     private StackPanel? _agentLog;
@@ -651,7 +653,7 @@ public partial class MainWindow : Window
         foreach (var f in _files)
         {
             try { File.Copy(f.Path, Path.Combine(dir, f.Name), overwrite: true); }
-            catch (Exception ex) { OnAgentActivity(AgentActivity.Info($"could not stage {f.Name}: {ex.Message}")); }
+            catch (Exception ex) { OnAgentActivity(AgentActivity.Signaled(LogSignal.StageFailed, $"could not stage {f.Name}: {ex.Message}", f.Name)); }
         }
         return dir;
     }
@@ -736,8 +738,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Writes the timestamped session event log (agent decisions, tool results, and
-    /// outcomes) to a user-chosen .txt file.</summary>
-    private void BtnSaveLog_Click(object sender, RoutedEventArgs e)
+    /// outcomes, plus the rule-based postmortem) to a user-chosen .txt file. When the
+    /// "AI review" box is checked, this log also gets a model-written review appended.</summary>
+    private async void BtnSaveLog_Click(object sender, RoutedEventArgs e)
     {
         if (_log.Count == 0)
         {
@@ -754,18 +757,44 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog() != true) return;
 
+        bool review = ChkAiReview.IsChecked == true;
         var header = new[]
         {
             new KeyValuePair<string, string>("Provider", _provider),
             new KeyValuePair<string, string>("Category", _cat),
             new KeyValuePair<string, string>("Agent mode",
                 ((_provider == "anthropic" && _agentMode) || (_provider == "lmstudio" && _lmStudioAgentMode)) ? "on" : "off"),
+            new KeyValuePair<string, string>("AI review", review ? "on" : "off"),
         };
+
+        string text = _log.Render(header);
+        bool reviewFailed = false;
+        if (review)
+        {
+            BtnSaveLog.IsEnabled = false;
+            ChkAiReview.IsEnabled = false;
+            SetStatus($"reviewing log with {_provider}...", "#FFC14D");
+            try
+            {
+                // Own token: a log review must not be cancelled by (or cancel) a running solve.
+                using var cts = new CancellationTokenSource(ReviewTimeout);
+                var result = await LogReviewer.ReviewAsync(BuildChatProvider(LogReviewer.SystemPrompt), text, cts.Token);
+                reviewFailed = !result.Success;
+                text = LogReviewer.Append(text, result);
+            }
+            finally
+            {
+                BtnSaveLog.IsEnabled = true;
+                ChkAiReview.IsEnabled = true;
+            }
+        }
 
         try
         {
-            File.WriteAllText(dlg.FileName, _log.Render(header));
-            SetStatus($"log saved  {Path.GetFileName(dlg.FileName)}", "#00E5B0");
+            File.WriteAllText(dlg.FileName, text);
+            SetStatus(reviewFailed ? $"log saved, AI review failed  {Path.GetFileName(dlg.FileName)}"
+                                   : $"log saved  {Path.GetFileName(dlg.FileName)}",
+                      reviewFailed ? "#FFC14D" : "#00E5B0");
         }
         catch (Exception ex)
         {
@@ -780,28 +809,49 @@ public partial class MainWindow : Window
     {
         switch (_provider)
         {
-            case "ollama":
-                return new OllamaProvider(_http, new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim()));
-            case "cursor":
-                return new CursorProvider(_http, new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim()));
-            case "lmstudio":
-                var lmOpts = new LmStudioOptions(TbLmStudioHost.Text, CbLmStudioModel.Text.Trim());
-                if (!_lmStudioAgentMode)
-                    return new LmStudioProvider(_http, lmOpts);
-
-                lmOpts = lmOpts with { UseTools = true, McpUrl = TbLmStudioMcpUrl.Text.Trim(), Category = _cat };
+            case "lmstudio" when _lmStudioAgentMode:
+                var lmOpts = new LmStudioOptions(TbLmStudioHost.Text, CbLmStudioModel.Text.Trim())
+                {
+                    UseTools = true, McpUrl = TbLmStudioMcpUrl.Text.Trim(), Category = _cat,
+                };
                 // Progress is captured on the UI thread, so handlers run there too.
                 var lmProgress = new Progress<AgentActivity>(OnAgentActivity);
                 return new LmStudioAgentProvider(_http, lmOpts, lmProgress);
-            default:
-                var anthOpts = new AnthropicOptions(PbAnthropicKey.Password);
-                if (!_agentMode)
-                    return new AnthropicProvider(_http, anthOpts);
-
-                anthOpts = anthOpts with { UseTools = true, McpUrl = TbMcpUrl.Text.Trim(), Category = _cat };
+            case "anthropic" when _agentMode:
+                var anthOpts = new AnthropicOptions(PbAnthropicKey.Password)
+                {
+                    UseTools = true, McpUrl = TbMcpUrl.Text.Trim(), Category = _cat,
+                };
                 // Progress is captured on the UI thread, so handlers run there too.
                 var progress = new Progress<AgentActivity>(OnAgentActivity);
                 return new AnthropicAgentProvider(_http, anthOpts, progress);
+            default:
+                return BuildChatProvider();
+        }
+    }
+
+    /// <summary>The selected backend as a plain chat provider (never an agent). A non-null
+    /// <paramref name="systemPrompt"/> replaces the CTF-solver prompt and lowers the temperature,
+    /// for analytical calls such as the AI log review.</summary>
+    private IChatProvider BuildChatProvider(string? systemPrompt = null)
+    {
+        const double analyticalTemperature = 0.2;
+        switch (_provider)
+        {
+            case "ollama":
+                var ollama = new OllamaOptions(TbOllamaHost.Text, CbOllamaModel.Text.Trim()) { SystemPrompt = systemPrompt };
+                if (systemPrompt is not null) ollama = ollama with { Temperature = analyticalTemperature };
+                return new OllamaProvider(_http, ollama);
+            case "cursor":
+                var cursor = new CursorOptions(PbCursorKey.Password, CbCursorModel.Text.Trim()) { SystemPrompt = systemPrompt };
+                if (systemPrompt is not null) cursor = cursor with { Temperature = analyticalTemperature };
+                return new CursorProvider(_http, cursor);
+            case "lmstudio":
+                var lm = new LmStudioOptions(TbLmStudioHost.Text, CbLmStudioModel.Text.Trim()) { SystemPrompt = systemPrompt };
+                if (systemPrompt is not null) lm = lm with { Temperature = analyticalTemperature };
+                return new LmStudioProvider(_http, lm);
+            default:
+                return new AnthropicProvider(_http, new AnthropicOptions(PbAnthropicKey.Password) { SystemPrompt = systemPrompt });
         }
     }
 
@@ -809,6 +859,7 @@ public partial class MainWindow : Window
     private void EnterBusy()
     {
         _loading = true;
+        _userStopped = false;
         _cts = new CancellationTokenSource();
         _cts.CancelAfter(RequestTimeout);   // safety cap; a manual Stop cancels the same token
         BtnSolve.Content = "  STOP";
@@ -829,7 +880,7 @@ public partial class MainWindow : Window
     // ── Solve ──────────────────────────────────────────────────────────────
     private async void BtnSolve_Click(object sender, RoutedEventArgs e)
     {
-        if (_loading) { _cts?.Cancel(); return; }   // second click = Stop
+        if (_loading) { _userStopped = true; _cts?.Cancel(); return; }   // second click = Stop
 
         string ch = _chPh ? "" : ChallengeTxt.Text.Trim();
         if (string.IsNullOrEmpty(ch) && _files.Count == 0)
@@ -849,7 +900,8 @@ public partial class MainWindow : Window
                           || (_provider == "lmstudio" && _lmStudioAgentMode);
         _log.Log(LogCategory.Session,
             $"Challenge submitted (provider={_provider}, category={_cat}, agent mode={(agentModeOn ? "on" : "off")}, " +
-            $"attachments={_files.Count}): {display}");
+            $"attachments={_files.Count}): {display}",
+            signal: LogSignal.RunStart, value: "challenge", number: _files.Count);
 
         // In agent mode, stage attachments into the toolbox workspace so the file
         // tools (list_workspace, file_type, strings_extract, ...) can read them.
@@ -892,7 +944,7 @@ public partial class MainWindow : Window
 
         AddMessage("user", text);
         _conv.AddUser(text);
-        _log.Log(LogCategory.Session, $"Follow-up: {text}");
+        _log.Log(LogCategory.Session, $"Follow-up: {text}", signal: LogSignal.RunStart, value: "follow-up");
         _agentLog = null;
         AddThinking();
 
@@ -931,7 +983,14 @@ public partial class MainWindow : Window
             StopStreamTimer();
             StopThinking();
 
-            _log.Log(LogCategory.Result, result.Success ? $"Final answer:\n{result.Text}" : $"Error: {result.Text}");
+            // Providers usually swallow cancellation and return the partial text as a success,
+            // so check the token to record a Stop or timeout rather than a "final answer".
+            if (ct.IsCancellationRequested)
+                LogStopped(result.Text);
+            else if (result.Success)
+                _log.Log(LogCategory.Result, $"Final answer:\n{result.Text}", signal: LogSignal.FinalAnswer);
+            else
+                _log.Log(LogCategory.Result, $"Error: {result.Text}", signal: LogSignal.Error);
 
             if (live is null)
             {
@@ -956,9 +1015,7 @@ public partial class MainWindow : Window
             StopStreamTimer();
             StopThinking();
             string partial = sb.ToString();
-            _log.Log(LogCategory.Result, partial.Length > 0
-                ? $"Stopped by user. Partial answer kept:\n{partial}"
-                : "Stopped by user before any answer streamed.");
+            LogStopped(partial);
             if (live is not null && partial.Length > 0)
             {
                 live.Inlines.Clear();
@@ -975,9 +1032,18 @@ public partial class MainWindow : Window
         {
             StopStreamTimer();
             StopThinking();
-            _log.Log(LogCategory.Result, $"Error: {ex.Message}");
+            _log.Log(LogCategory.Result, $"Error: {ex.Message}", signal: LogSignal.Error);
             AddMessage("assistant", $"Error: {ex.Message}");
             _conv.RemoveLast();
         }
+    }
+
+    /// <summary>Records a cancelled run as a user Stop or a safety timeout, keeping any partial answer.</summary>
+    private void LogStopped(string partial)
+    {
+        string why = _userStopped ? "Stopped by user" : $"Timed out after {RequestTimeout.TotalMinutes:0} min";
+        _log.Log(LogCategory.Result,
+                 partial.Length > 0 ? $"{why}. Partial answer kept:\n{partial}" : $"{why} before any answer streamed.",
+                 signal: _userStopped ? LogSignal.Stopped : LogSignal.TimedOut);
     }
 }

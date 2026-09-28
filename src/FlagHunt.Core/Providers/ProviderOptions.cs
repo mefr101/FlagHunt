@@ -16,18 +16,27 @@ public sealed record AnthropicOptions(string ApiKey)
 
     /// <summary>Selected CTF category; filters which toolbox tools are offered to the model.</summary>
     public string Category { get; init; } = "auto";
+
+    /// <summary>Overrides the CTF-solver system prompt (e.g. for the log reviewer). Null = <see cref="CtfKnowledge.SystemPrompt"/>.</summary>
+    public string? SystemPrompt { get; init; }
 }
 
 public sealed record OllamaOptions(string Host, string Model)
 {
     public int NumPredict { get; init; } = 8192;
     public double Temperature { get; init; } = 0.7;
+
+    /// <summary>Overrides the CTF-solver system prompt (e.g. for the log reviewer). Null = <see cref="CtfKnowledge.SystemPrompt"/>.</summary>
+    public string? SystemPrompt { get; init; }
 }
 
 public sealed record CursorOptions(string ApiKey, string Model)
 {
     public int MaxTokens { get; init; } = 8192;
     public double Temperature { get; init; } = 0.7;
+
+    /// <summary>Overrides the CTF-solver system prompt (e.g. for the log reviewer). Null = <see cref="CtfKnowledge.SystemPrompt"/>.</summary>
+    public string? SystemPrompt { get; init; }
 }
 
 public sealed record LmStudioOptions(string Host, string Model)
@@ -46,4 +55,7 @@ public sealed record LmStudioOptions(string Host, string Model)
 
     /// <summary>Selected CTF category; filters which toolbox tools are offered to the model.</summary>
     public string Category { get; init; } = "auto";
+
+    /// <summary>Overrides the CTF-solver system prompt (e.g. for the log reviewer). Null = <see cref="CtfKnowledge.SystemPrompt"/>.</summary>
+    public string? SystemPrompt { get; init; }
 }

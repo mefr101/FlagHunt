@@ -35,11 +35,12 @@ public sealed class AnthropicAgentProvider(
         McpToolbox toolbox;
         try
         {
-            progress?.Report(AgentActivity.Info($"connecting to MCP toolbox at {options.McpUrl} ..."));
+            progress?.Report(AgentActivity.Signaled(LogSignal.AgentStart, $"connecting to MCP toolbox at {options.McpUrl} ..."));
             toolbox = await McpToolbox.ConnectAsync(options.McpUrl, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
+            progress?.Report(AgentActivity.Signaled(LogSignal.McpUnreachable, $"MCP toolbox unreachable: {ex.Message}", ex.Message));
             return ChatResult.Error(
                 $"Cannot reach the MCP toolbox at {options.McpUrl}\n\n" +
                 "Start it first:\n  cd mcp\n  docker compose up --build\n\n" +
@@ -65,13 +66,13 @@ public sealed class AnthropicAgentProvider(
             {
                 if (iteration >= options.MaxToolIterations)
                 {
-                    progress?.Report(AgentActivity.Info(
-                        $"reached the {options.MaxToolIterations}-iteration tool cap; stopping."));
+                    progress?.Report(AgentActivity.Signaled(LogSignal.IterationCap,
+                        $"reached the {options.MaxToolIterations}-iteration tool cap; stopping.", number: options.MaxToolIterations));
                     finalText.Append("\n\n[Agent stopped after the tool-iteration cap was reached.]");
                     break;
                 }
 
-                progress?.Report(AgentActivity.Info($"-- iteration {iteration + 1} --"));
+                progress?.Report(AgentActivity.Signaled(LogSignal.IterationStart, $"-- iteration {iteration + 1} --", number: iteration + 1));
 
                 JsonObject response;
                 try
@@ -80,6 +81,7 @@ public sealed class AnthropicAgentProvider(
                 }
                 catch (Exception ex)
                 {
+                    progress?.Report(AgentActivity.Signaled(LogSignal.RequestFailed, $"request failed: {ex.Message}", ex.Message));
                     return finalText.Length > 0
                         ? ChatResult.Ok(finalText + $"\n\n[Run interrupted: {ex.Message}]")
                         : ChatResult.Error($"Request failed: {ex.Message}");
@@ -107,13 +109,14 @@ public sealed class AnthropicAgentProvider(
 
                 var usage = response["usage"]?.AsObject();
                 if (usage is not null)
-                    progress?.Report(AgentActivity.Info(
-                        $"usage: in={usage["input_tokens"]}, out={usage["output_tokens"]} tokens"));
+                    progress?.Report(AgentActivity.Signaled(LogSignal.Usage,
+                        $"usage: in={usage["input_tokens"]}, out={usage["output_tokens"]} tokens",
+                        number: TokenCount(usage["input_tokens"]) + TokenCount(usage["output_tokens"])));
 
                 string? stopReason = (string?)response["stop_reason"];
                 if (stopReason != "tool_use")
                 {
-                    progress?.Report(AgentActivity.Info($"stop reason: {stopReason ?? "end"}"));
+                    progress?.Report(AgentActivity.Signaled(LogSignal.StopReason, $"stop reason: {stopReason ?? "end"}", stopReason ?? "end"));
                     break; // nothing more to call -- we're done.
                 }
 
@@ -131,7 +134,7 @@ public sealed class AnthropicAgentProvider(
                     .ToList();
 
                 foreach (var c in calls)
-                    progress?.Report(AgentActivity.ToolCall($"{c.name}({Summarize(c.input)})"));
+                    progress?.Report(AgentActivity.Call(c.name, $"{c.name}({Summarize(c.input)})"));
 
                 // Run the turn's tool calls concurrently (capped) -- most CTF tools are
                 // independent, so this collapses an N-tool turn from sum- to max-latency.
@@ -159,7 +162,7 @@ public sealed class AnthropicAgentProvider(
                 var toolResults = new JsonArray();
                 for (int i = 0; i < calls.Count; i++)
                 {
-                    progress?.Report(AgentActivity.ToolResult(Preview(outputs[i])));
+                    progress?.Report(AgentActivity.Result(calls[i].name, Preview(outputs[i]), McpToolbox.IsError(outputs[i])));
                     toolResults.Add(new JsonObject
                     {
                         ["type"] = "tool_result",
@@ -244,6 +247,9 @@ public sealed class AnthropicAgentProvider(
         if (blocks.Count == 0) return;
         blocks[^1]!.AsObject()["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
     }
+
+    private static long TokenCount(JsonNode? node)
+        => node is JsonValue v && v.TryGetValue(out long n) ? n : 0;
 
     private static string Summarize(JsonObject input)
     {

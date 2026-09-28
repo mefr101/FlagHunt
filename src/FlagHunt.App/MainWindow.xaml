@@ -484,7 +484,12 @@
                                     ToolTip="Delete challenge files staged in the MCP toolbox workspace (mcp/challenges)"/>
                             <Button Content="clear"   Style="{StaticResource SmallBtn}" Click="BtnClear_Click"/>
                             <Button Content="copy all" Style="{StaticResource SmallBtn}" Click="BtnCopy_Click"/>
-                            <Button Content="save log" Style="{StaticResource SmallBtn}" Click="BtnSaveLog_Click"
+                            <CheckBox x:Name="ChkAiReview" Content="AI review"
+                                      Foreground="{StaticResource MutedBrush}"
+                                      FontFamily="Segoe UI" FontSize="10"
+                                      VerticalAlignment="Center" Cursor="Hand" Margin="8,0,2,0"
+                                      ToolTip="When checked, the next saved log also gets an AI review: the selected provider (without tools) checks the postmortem verdict, names the root cause and suggests next steps. The log is sent to that provider."/>
+                            <Button x:Name="BtnSaveLog" Content="save log" Style="{StaticResource SmallBtn}" Click="BtnSaveLog_Click"
                                     ToolTip="Export the timestamped session event log (agent decisions and results) to a .txt file"/>
                         </StackPanel>
                     </DockPanel>

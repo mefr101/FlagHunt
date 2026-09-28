@@ -3,4 +3,7 @@
     <Project Path="src/FlagHunt.App/FlagHunt.App.csproj" />
     <Project Path="src/FlagHunt.Core/FlagHunt.Core.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FlagHunt.Core.Tests/FlagHunt.Core.Tests.csproj" />
+  </Folder>
 </Solution>

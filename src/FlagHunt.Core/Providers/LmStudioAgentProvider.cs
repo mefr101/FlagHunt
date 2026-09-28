@@ -40,11 +40,12 @@ public sealed class LmStudioAgentProvider(
         McpToolbox toolbox;
         try
         {
-            progress?.Report(AgentActivity.Info($"connecting to MCP toolbox at {options.McpUrl} ..."));
+            progress?.Report(AgentActivity.Signaled(LogSignal.AgentStart, $"connecting to MCP toolbox at {options.McpUrl} ..."));
             toolbox = await McpToolbox.ConnectAsync(options.McpUrl, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
+            progress?.Report(AgentActivity.Signaled(LogSignal.McpUnreachable, $"MCP toolbox unreachable: {ex.Message}", ex.Message));
             return ChatResult.Error(
                 $"Cannot reach the MCP toolbox at {options.McpUrl}\n\n" +
                 "Start it first:\n  cd mcp\n  docker compose up --build\n\n" +
@@ -76,13 +77,13 @@ public sealed class LmStudioAgentProvider(
             {
                 if (iteration >= options.MaxToolIterations)
                 {
-                    progress?.Report(AgentActivity.Info(
-                        $"reached the {options.MaxToolIterations}-iteration tool cap; stopping."));
+                    progress?.Report(AgentActivity.Signaled(LogSignal.IterationCap,
+                        $"reached the {options.MaxToolIterations}-iteration tool cap; stopping.", number: options.MaxToolIterations));
                     finalText.Append("\n\n[Agent stopped after the tool-iteration cap was reached.]");
                     break;
                 }
 
-                progress?.Report(AgentActivity.Info($"-- iteration {iteration + 1} --"));
+                progress?.Report(AgentActivity.Signaled(LogSignal.IterationStart, $"-- iteration {iteration + 1} --", number: iteration + 1));
 
                 JsonObject response;
                 try
@@ -91,6 +92,7 @@ public sealed class LmStudioAgentProvider(
                 }
                 catch (Exception ex)
                 {
+                    progress?.Report(AgentActivity.Signaled(LogSignal.RequestFailed, $"request failed: {ex.Message}", ex.Message));
                     return finalText.Length > 0
                         ? ChatResult.Ok(finalText + $"\n\n[Run interrupted: {ex.Message}]")
                         : ChatResult.Error($"Request failed: {ex.Message}");
@@ -117,15 +119,17 @@ public sealed class LmStudioAgentProvider(
 
                 var usage = response["usage"]?.AsObject();
                 if (usage is not null)
-                    progress?.Report(AgentActivity.Info(
-                        $"usage: prompt={usage["prompt_tokens"]}, completion={usage["completion_tokens"]} tokens"));
+                    progress?.Report(AgentActivity.Signaled(LogSignal.Usage,
+                        $"usage: prompt={usage["prompt_tokens"]}, completion={usage["completion_tokens"]} tokens",
+                        number: TokenCount(usage["prompt_tokens"]) + TokenCount(usage["completion_tokens"])));
 
                 var toolCalls = message["tool_calls"]?.AsArray();
                 bool wantsTools = (string?)choice["finish_reason"] == "tool_calls"
                                   || (toolCalls is { Count: > 0 });
                 if (!wantsTools || toolCalls is null || toolCalls.Count == 0)
                 {
-                    progress?.Report(AgentActivity.Info($"finish reason: {(string?)choice["finish_reason"] ?? "stop"}"));
+                    string finish = (string?)choice["finish_reason"] ?? "stop";
+                    progress?.Report(AgentActivity.Signaled(LogSignal.StopReason, $"finish reason: {finish}", finish));
                     break; // nothing more to call -- we're done.
                 }
 
@@ -166,7 +170,7 @@ public sealed class LmStudioAgentProvider(
                 }).ToList();
 
                 foreach (var c in parsed)
-                    progress?.Report(AgentActivity.ToolCall($"{c.name}({Summarize(c.rawArgs)})"));
+                    progress?.Report(AgentActivity.Call(c.name, $"{c.name}({Summarize(c.rawArgs)})"));
 
                 // Run the turn's tool calls concurrently (capped) -- independent CTF tools then
                 // run in parallel instead of serially. Calls that failed to parse skip the
@@ -194,7 +198,7 @@ public sealed class LmStudioAgentProvider(
 
                 for (int i = 0; i < parsed.Count; i++)
                 {
-                    progress?.Report(AgentActivity.ToolResult(Preview(outputs[i])));
+                    progress?.Report(AgentActivity.Result(parsed[i].name, Preview(outputs[i]), McpToolbox.IsError(outputs[i])));
                     messages.Add(new JsonObject
                     {
                         ["role"] = "tool",
@@ -238,6 +242,9 @@ public sealed class LmStudioAgentProvider(
 
         return (JsonObject)JsonNode.Parse(json)!;
     }
+
+    private static long TokenCount(JsonNode? node)
+        => node is JsonValue v && v.TryGetValue(out long n) ? n : 0;
 
     private static string Summarize(string rawArgs)
     {

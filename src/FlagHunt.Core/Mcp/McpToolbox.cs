@@ -138,6 +138,12 @@ public sealed class McpToolbox : IAsyncDisposable
         return triage.Count > 0 ? triage : Tools;
     }
 
+    /// <summary>Prefix marking a tool output as a failure (from the toolbox or the agent loop).</summary>
+    public const string ErrorPrefix = "tool error: ";
+
+    /// <summary>True when <paramref name="output"/> is a tool failure rather than real output.</summary>
+    public static bool IsError(string output) => output.StartsWith(ErrorPrefix, StringComparison.Ordinal);
+
     /// <summary>Runs a single tool and returns its combined text output.</summary>
     public async Task<string> CallAsync(string name, IReadOnlyDictionary<string, object?> arguments, CancellationToken ct = default)
     {
@@ -153,7 +159,7 @@ public sealed class McpToolbox : IAsyncDisposable
         if (string.IsNullOrEmpty(text))
             text = "[tool returned no text content]";
 
-        return result.IsError == true ? $"tool error: {text}" : text;
+        return result.IsError == true ? ErrorPrefix + text : text;
     }
 
     public ValueTask DisposeAsync() => _client.DisposeAsync();

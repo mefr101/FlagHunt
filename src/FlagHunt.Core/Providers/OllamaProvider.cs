@@ -20,7 +20,7 @@ public sealed class OllamaProvider(HttpClient http, OllamaOptions options) : ICh
 
         var msgArr = new JsonArray
         {
-            new JsonObject { ["role"] = "system", ["content"] = CtfKnowledge.SystemPrompt }
+            new JsonObject { ["role"] = "system", ["content"] = options.SystemPrompt ?? CtfKnowledge.SystemPrompt }
         };
         foreach (var m in history)
             msgArr.Add(new JsonObject { ["role"] = m.Role, ["content"] = m.Content });

@@ -24,10 +24,13 @@ src/
     Conversation.cs            Message-history state
     ContentBuilder.cs          Packs challenge text + attachments into a prompt
     Providers/                 IChatProvider + Anthropic / Ollama / LM Studio / Cursor
+    Agent/                     Agent activity events, session event log, postmortem analyzer
   FlagHunt.App/                Frontend — WPF GUI (net8.0-windows), references Core
     App.xaml                   Color palette resources
     MainWindow.xaml            Layout
     MainWindow.xaml.cs         UI logic; delegates all AI work to FlagHunt.Core
+tests/
+  FlagHunt.Core.Tests/         xUnit tests for the backend (postmortem analyzer)
 mcp/                           Optional MCP toolbox for agent mode (see below)
   docker-compose.yml           Runs the toolbox with sandboxing flags
   server/server.py             FastMCP server + the benign CTF analysis tools
@@ -68,6 +71,9 @@ dotnet build FlagHunt.slnx
 
 # Run directly (Debug)
 dotnet run --project src/FlagHunt.App
+
+# Run the unit tests (FlagHunt.Core)
+dotnet test FlagHunt.slnx
 ```
 
 ### Produce a distributable build
@@ -159,6 +165,17 @@ the partial answer is kept).
   with its arguments, tool outputs, token usage, stop reason) plus session milestones
   (challenge submitted, follow-ups, final answer, errors, stops). Records agent-mode runs
   in full; chat-mode runs still log the prompts and outcomes. Cleared by **clear**.
+  The log ends with a rule-based **POSTMORTEM**: one verdict per run (challenge or
+  follow-up) -- `SOLVED (verified)` when the reported flag also appears in a tool output,
+  `SOLVED (unverified)`, `PARTIAL`, `ANSWERED`, `STOPPED`, `TIMED OUT`, `FAILED` -- with run
+  stats and the likely causes plus suggested fixes (provider errors such as 401/429/529,
+  unreachable toolbox, iteration cap, truncated output, tool errors, looping tool calls,
+  files attached in chat mode, and so on).
+- **AI review** — tick this box before **save log** to append an **AI REVIEW** to that log.
+  The selected provider (plain chat, no tools, with a dedicated reviewer prompt) checks the
+  postmortem verdict, names the root cause with timestamps, and suggests next steps. It's a
+  per-save choice and off by default; the log is sent to that provider, long logs are
+  condensed to ~60k chars first, and if the review fails the log still saves with a note.
 
 ### File attachments
 
